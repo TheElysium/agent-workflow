@@ -16,6 +16,7 @@ opencode/                    ← ~/.config/opencode/ (symlinks WSL)
 claude/                      ← /mnt/c/Users/lukas/.claude/ (junction + hardlinks NTFS)
 ├── CLAUDE.md                Règles globales (miroir d'AGENTS.md, orchestration dans le main loop)
 ├── settings.json            Permission ask sur git push, plugins activés
+├── statusline-command.sh    Statusline (référencé par settings.json, hardlinké dans .claude/)
 └── agents/                  implementer, reviewer, gate-keeper, explore, bulk-reader, code-writer
 
 setup.sh                     crée/vérifie les liens (tous, ou opencode/claude séparément)

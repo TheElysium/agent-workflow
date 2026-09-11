@@ -1,4 +1,4 @@
-<!-- Source of truth: ~/.config/opencode/AGENTS.md (opencode side). Keep this file in sync after edits there. -->
+<!-- Source of truth: this repo (agent-workflow/opencode/AGENTS.md, which the opencode config symlinks to). Keep both files in sync after edits. -->
 
 # Token routing (shunt pattern)
 
