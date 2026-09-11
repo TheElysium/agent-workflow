@@ -1,7 +1,7 @@
 ---
 description: Read-only peer reviewer - delegates code review of a diff away from the orchestrator. Checks correctness, security, cyclomatic complexity, style and TDD compliance, then returns an APPROVE or REQUEST_CHANGES verdict. Run before committing.
 mode: subagent
-model: opencode-go/glm-5.3
+model: opencode-go/glm-5.3-flash
 temperature: 0
 permission:
   edit: deny
