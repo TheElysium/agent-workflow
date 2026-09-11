@@ -10,6 +10,20 @@
     "type": "command",
     "command": "bash /c/Users/lukas/.claude/statusline-command.sh"
   },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /c/Users/lukas/.claude/hooks/shunt.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
   "enabledPlugins": {
     "superpowers@claude-plugins-official": true,
     "rust-skills@rust-skills": true,

@@ -15,8 +15,10 @@ opencode/                    ← ~/.config/opencode/ (WSL symlinks)
 
 claude/                      ← /mnt/c/Users/lukas/.claude/ (NTFS junction + hardlinks)
 ├── CLAUDE.md                Global rules (mirror of AGENTS.md, orchestration in the main loop)
-├── settings.json            git push ask permission, enabled plugins
+├── settings.json            git push ask permission, hooks, enabled plugins
 ├── statusline-command.sh    Statusline (referenced by settings.json, hardlinked into .claude/)
+├── hooks/shunt.sh           Shunt hook (PreToolUse: blocks oversized non-targeted reads)
+│                            + hooks/test-shunt.sh (test harness, 20 cases)
 └── agents/                  implementer, reviewer, gate-keeper, explore, bulk-reader, code-writer
 
 setup.sh                     creates/verifies the links (all, or opencode/claude separately)
@@ -25,7 +27,7 @@ setup.sh                     creates/verifies the links (all, or opencode/claude
 ## No sync step: live configs point into the repo
 
 - **opencode**: `~/.config/opencode/{AGENTS.md,opencode.jsonc,package*.json,agent,plugins}` are WSL symlinks into this repo.
-- **Claude Code**: `.claude/CLAUDE.md` and `.claude/settings.json` are NTFS **hardlinks**, `.claude/agents` is a **junction** — visible from both Windows and WSL.
+- **Claude Code**: `.claude/CLAUDE.md` and `.claude/settings.json` are NTFS **hardlinks**, `.claude/agents` is a **junction**, `.claude/hooks/shunt.sh` is a hardlink — visible from both Windows and WSL.
 
 Consequence: **the repo IS the live config**. Edit here, the tool sees it immediately (at the next session start for agents).
 
@@ -54,5 +56,6 @@ Details: see `opencode/AGENTS.md` (source of truth).
 ## Cross-tool sync notes
 
 - `opencode/AGENTS.md` and `claude/CLAUDE.md` are copies maintained in parallel. Any edit to one must be carried into the other (the repo keeps them side by side).
+- **Shunt parity**: opencode enforces it via the `shunt.ts` plugin, Claude Code via the `shunt.sh` hook (same thresholds, 350 lines / 65536 bytes; tuned on either side with `SHUNT_MIN_LINES` / `SHUNT_MAX_BYTES`). Boundary detail: a file with exactly 350 lines passes on the Claude side (`wc -l`), while shunt.ts counts the trailing newline as a line and blocks it. Claude Code flags subagent calls with a top-level `agent_id`, which replaces the plugin's delegated-session tracking. Test the hook with `bash claude/hooks/test-shunt.sh` (exercises the WSL path fallback; the Git Bash/cygpath branch is exercised in production).
 - Accepted divergences: `hidden`/`temperature` agent fields are opencode only; detailed permissions (Task, bash patterns) opencode only; `git push` ask = permission rule on the Claude Code side, `permission` field on the opencode side.
 - `claude/settings.json` is versioned without secrets (credentials live in `.credentials.json`, never committed).

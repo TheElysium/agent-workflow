@@ -80,7 +80,7 @@ preflight_claude() {
   [ -x "$CMD" ] || die "cmd.exe not found at $CMD (is WSL interop enabled?)"
   command -v wslpath >/dev/null || die "wslpath not available"
   [ -d "$REPO/claude/agents" ] || die "missing repo dir: claude/agents"
-  for f in CLAUDE.md settings.json statusline-command.sh; do
+  for f in CLAUDE.md settings.json statusline-command.sh hooks/shunt.sh; do
     [ -f "$REPO/claude/$f" ] || die "missing repo file: claude/$f"
   done
 }
@@ -143,15 +143,17 @@ link_claude() {
       die "swap failed for agents"
     fi
   fi
+  mkdir -p "$CL/hooks"               # live home for the shunt hook
   for f in CLAUDE.md settings.json statusline-command.sh; do
     link_claude_file "$CL/$f" "$REPO/claude/$f"
   done
-  echo "claude: $CL/{CLAUDE.md,settings.json,statusline-command.sh,agents} -> $REPO/claude (junction + hardlinks)"
+  link_claude_file "$CL/hooks/shunt.sh" "$REPO/claude/hooks/shunt.sh"
+  echo "claude: $CL/{CLAUDE.md,settings.json,statusline-command.sh,agents,hooks/shunt.sh} -> $REPO/claude (junction + hardlinks)"
 }
 
 check_claude() {
   local bad=0
-  for f in CLAUDE.md settings.json statusline-command.sh; do
+  for f in CLAUDE.md settings.json statusline-command.sh hooks/shunt.sh; do
     if [ ! -f "$REPO/claude/$f" ]; then
       echo "BROKEN: repo file missing: claude/$f"; bad=1; continue
     fi
