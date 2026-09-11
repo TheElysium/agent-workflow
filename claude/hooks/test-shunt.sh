@@ -18,9 +18,10 @@ FAIL=0
 
 # --- fixtures -------------------------------------------------------------
 # Fixtures live on the Windows drive so that wslpath -w yields real C:\...
-# paths, exactly like the Read tool sends them in production.
+# paths, exactly like the Read tool sends them in production. Override
+# SHUNT_TEST_TMP if the Windows username is not "lukas".
 
-TDIR="$(mktemp -d /mnt/c/Users/lukas/AppData/Local/Temp/shunt-test.XXXXXX)"
+TDIR="$(mktemp -d "${SHUNT_TEST_TMP:-/mnt/c/Users/lukas/AppData/Local/Temp}/shunt-test.XXXXXX")"
 trap 'rm -rf "$TDIR"' EXIT
 
 # 400 lines, small bytes (line-threshold trigger)

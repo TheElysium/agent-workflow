@@ -66,13 +66,13 @@ Target: Windows host + WSL (NTFS junctions/hardlinks require both). Steps:
 5. Pricing patch: add `opencode/mimo-v2.5-free` (and variants) to `node_modules/opencode-telemetry/src/pricing.json` (free = 0) — ephemeral patch, redo after `npm update`
 6. Agents/opencode.jsonc reload at the next session; Claude Code re-reads `CLAUDE.md`/`settings.json` (including hooks) at launch
 
-### Machine-specific paths (edit on a fresh machine)
+### Machine-specific paths
 
-These paths are hardcoded to this workstation; Claude Code does not expand variables in hook/statusline commands, so they must be edited by hand:
+None hardcoded: `settings.json` uses `~` (Git Bash resolves it to the Windows home), and `setup.sh` auto-detects the Windows username via `cmd.exe`. Override points:
 
-- `setup.sh` line `CL="${CLAUDE_CONFIG_DIR:-/mnt/c/Users/lukas/.claude}"` (a `CLAUDE_CONFIG_DIR` env var overrides the default)
-- `claude/settings.json`: `statusLine.command` and `hooks` command — `/c/Users/<user>/.claude/...`
-- Windows username `lukas` also appears in the mklink junction/hardlink targets resolved via `wslpath` (no edit needed, they derive from the repo location)
+- `CLAUDE_CONFIG_DIR` env var — replaces the auto-detected live `.claude` dir in `setup.sh`
+- `SHUNT_TEST_TMP` env var — replaces the fixture temp dir in `claude/hooks/test-shunt.sh` (dev only)
+- `CMD` env var — non-standard `cmd.exe` location in `setup.sh`
 
 Everything else (agents, rules, hook logic, thresholds) is machine-agnostic.
 

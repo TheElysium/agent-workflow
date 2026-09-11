@@ -8,7 +8,7 @@
   },
   "statusLine": {
     "type": "command",
-    "command": "bash /c/Users/lukas/.claude/statusline-command.sh"
+    "command": "bash ~/.claude/statusline-command.sh"
   },
   "hooks": {
     "PreToolUse": [
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash /c/Users/lukas/.claude/hooks/shunt.sh",
+            "command": "bash ~/.claude/hooks/shunt.sh",
             "timeout": 10
           }
         ]

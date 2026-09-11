@@ -16,11 +16,19 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OC="$HOME/.config/opencode"
 OC_REPO="$REPO/opencode"
-CL="${CLAUDE_CONFIG_DIR:-/mnt/c/Users/lukas/.claude}"   # live Claude Code config (NTFS)
 CMD="${CMD:-/mnt/c/Windows/System32/cmd.exe}"
 
+# Live Claude Code config: auto-detect the Windows user via cmd.exe, or set
+# CLAUDE_CONFIG_DIR to take control (empty when detection fails; the claude
+# preflight/check will ask for CLAUDE_CONFIG_DIR).
+CL="${CLAUDE_CONFIG_DIR:-}"
+if [ -z "$CL" ]; then
+  winuser=$("$CMD" /c 'echo %USERNAME%' 2>/dev/null | tr -d '\r\n')
+  [ -n "$winuser" ] && CL="/mnt/c/Users/$winuser/.claude"
+fi
+
 # Remove this run's temp links on exit (success leaves none; failures must not leak).
-cleanup_tmp() { rm -f "$CL"/.tmp.*."$$" 2>/dev/null || true; }
+cleanup_tmp() { if [ -n "$CL" ]; then rm -f "$CL"/.tmp.*."$$" 2>/dev/null || true; fi; }
 trap cleanup_tmp EXIT
 trap 'cleanup_tmp; exit 130' INT TERM
 
@@ -76,6 +84,7 @@ check_opencode() {
 # ---------- claude (NTFS junction + hardlinks, no admin needed) ----------
 
 preflight_claude() {
+  [ -n "$CL" ] || die "cannot detect the Windows user dir (interop off?) — set CLAUDE_CONFIG_DIR"
   [ -d "$CL" ] || die "live claude dir not found: $CL (tune CLAUDE_CONFIG_DIR)"
   [ -x "$CMD" ] || die "cmd.exe not found at $CMD (is WSL interop enabled?)"
   command -v wslpath >/dev/null || die "wslpath not available"
@@ -153,6 +162,7 @@ link_claude() {
 
 check_claude() {
   local bad=0
+  [ -n "$CL" ] || { echo "BROKEN: cannot detect the Windows user dir — set CLAUDE_CONFIG_DIR"; exit 1; }
   for f in CLAUDE.md settings.json statusline-command.sh hooks/shunt.sh; do
     if [ ! -f "$REPO/claude/$f" ]; then
       echo "BROKEN: repo file missing: claude/$f"; bad=1; continue
