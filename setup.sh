@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Links the live tool configs INTO this repo, so there is no sync step:
 # edit a repo file, the tool reads it live. Run once per machine, or to
-# repair a link (e.g. if a tool rewrote a hardlinked file).
+# repair a link (re-running the same command is idempotent).
 #
-#   ./setup.sh          create/repair all links
-#   ./setup.sh --check  verify every link resolves
+#   ./setup.sh                    # link everything
+#   ./setup.sh opencode           # opencode links only
+#   ./setup.sh claude             # claude links only (also repairs them)
+#   ./setup.sh [--check] [opencode|claude]
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -38,20 +40,38 @@ link_claude() {
   echo "claude: $CL/{CLAUDE.md,settings.json,agents} -> $REPO/claude (junction + hardlinks)"
 }
 
-check() {
-  for p in "$OC/AGENTS.md" "$OC/agent" "$OC/plugins" "$OC/opencode.jsonc"; do
+check_opencode() {
+  for p in "$OC/AGENTS.md" "$OC/agent" "$OC/plugins" "$OC/opencode.jsonc" "$OC/package.json" "$OC/package-lock.json"; do
     [ -e "$p" ] || { echo "BROKEN: $p"; exit 1; }
   done
+  echo "opencode: links resolve"
+}
+
+check_claude() {
   for p in "$CL/CLAUDE.md" "$CL/settings.json" "$CL/agents/implementer.md"; do
     [ -e "$p" ] || { echo "BROKEN: $p"; exit 1; }
   done
-  echo "all links resolve"
+  echo "claude: links resolve"
 }
 
+TOOL="all"
+ACTION="create"
+for arg in "$@"; do
+  case "$arg" in
+    opencode | claude) TOOL="$arg" ;;
+    all)               TOOL="all" ;;
+    --check)           ACTION="check" ;;
+    *) echo "usage: setup.sh [--check] [opencode|claude]"; exit 1 ;;
+  esac
+done
 
-case "${1:-}" in
-  "" | setup) link_opencode; link_claude ;;
-  --repair)   link_claude ;;  # hardlinks are the fragile part (tool rewrites)
-  --check)    check ;;
-  *) echo "usage: setup.sh [--check|--repair]"; exit 1 ;;
-esac
+run() { # run <op> <tool>
+  case "$1" in
+    link)  [ "$2" = opencode ] && link_opencode || link_claude ;;
+    check) [ "$2" = opencode ] && check_opencode || check_claude ;;
+  esac
+}
+
+for t in opencode claude; do
+  if [ "$TOOL" = all ] || [ "$TOOL" = "$t" ]; then run "$ACTION" "$t"; fi
+done

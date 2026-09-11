@@ -18,7 +18,7 @@ claude/                      ← /mnt/c/Users/lukas/.claude/ (junction + hardlin
 ├── settings.json            Permission ask sur git push, plugins activés
 └── agents/                  implementer, reviewer, gate-keeper, explore, bulk-reader, code-writer
 
-setup.sh                     crée/répare les liens (une fois par machine)
+setup.sh                     crée/vérifie les liens (tous, ou opencode/claude séparément)
 ```
 
 ## Pas de sync : les configs live pointent dans le repo
@@ -30,10 +30,11 @@ Conséquence : **le repo EST la config live**. Éditez ici, l'outil le voit imm�
 
 ```bash
 ./setup.sh --check    # vérifier que tous les liens résolvent
-./setup.sh --repair   # recréer les liens claude si un outil a réécrit un fichier hardlinké
+./setup.sh            # (re)créer tous les liens — ré-exécutable, répare ce qui a cassé
+./setup.sh opencode   # limiter aux liens opencode (idem avec claude)
 ```
 
-Caveat connu : un outil qui réécrit un fichier hardlinké via un save temporaire+rename casse le lien (le fichier devient une copie autonome). Si `--check` est vert mais qu'un edit ne se propage pas, comparer avec `git diff`, puis `./setup.sh --repair`.
+Caveat connu : un outil qui réécrit un fichier hardlinké via un save temporaire+rename casse le lien (le fichier devient une copie autonome). Si `--check` est vert mais qu'un edit ne se propage pas, comparer avec `git diff`, puis ré-exécuter `./setup.sh claude`.
 
 ## Workflow (résumé)
 
