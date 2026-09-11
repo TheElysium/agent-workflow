@@ -70,7 +70,7 @@ format: cargo fmt --check        # optional
 
 - `gate-keeper` reads it verbatim, runs each key, and reports a structured pass/fail per command (never interprets results).
 - Missing file → gate-keeper must ask the user for each command and offer to write the file.
-- Project CI (`.github/workflows/`) must run the same commands — template: `templates/ci-gates.yml` in agent-workflow.
+- Local enforcement is the default: gates are enforced by `@gate-keeper` before a task is done and before commit — no CI needed. Adding the CI layer is optional and only for projects whose CI you control (copy `templates/ci-gates.yml` from agent-workflow as `.github/workflows/ci.yml`, keep it in sync with `.gates.yml`).
 
 ## Phase 5 — Git
 
