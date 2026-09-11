@@ -14,6 +14,25 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Pre-commit gate lives in githooks/ (see check_hooks/install_hooks).
+install_hooks() {
+  if [ -d "$REPO/.git" ]; then
+    git -C "$REPO" config core.hooksPath githooks
+  fi
+}
+
+check_hooks() {
+  if [ ! -d "$REPO/.git" ]; then
+    echo "hooks: no .git dir — pre-commit gate not applicable"
+    return
+  fi
+  if [ "$(git -C "$REPO" config core.hooksPath 2>/dev/null || true)" = githooks ]; then
+    echo "hooks: core.hooksPath = githooks"
+  else
+    echo "BROKEN: core.hooksPath not set to githooks — pre-commit gate inactive"; exit 1
+  fi
+}
 OC="$HOME/.config/opencode"
 OC_REPO="$REPO/opencode"
 CMD="${CMD:-/mnt/c/Windows/System32/cmd.exe}"
@@ -195,12 +214,14 @@ for arg in "$@"; do
 done
 
 run() { # run <action> <tool>
-  if [ "$2" = opencode ]; then
-    if [ "$1" = check ]; then check_opencode; else link_opencode; fi
+  if [ "$1" = check ]; then
+    if [ "$2" = opencode ]; then check_opencode; else check_claude; fi
   else
-    if [ "$1" = check ]; then check_claude; else link_claude; fi
+    if [ "$2" = opencode ]; then link_opencode; else link_claude; fi
   fi
 }
+
+if [ "$ACTION" = check ]; then check_hooks; else install_hooks; fi
 
 for t in opencode claude; do
   if [ "$TOOL" = all ] || [ "$TOOL" = "$t" ]; then run "$ACTION" "$t"; fi

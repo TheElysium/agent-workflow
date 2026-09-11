@@ -21,6 +21,10 @@ claude/                      ← /mnt/c/Users/<win-user>/.claude/ (NTFS junction
 │                            + hooks/test-shunt.sh (test harness, 20 cases)
 └── agents/                  implementer, reviewer, gate-keeper, explore, bulk-reader, code-writer
 
+githooks/pre-commit           self-gate of this repo (shellcheck, secrets, accents, JSON)
+githooks/test-pre-commit.sh   smoke tests for the pre-commit gate
+templates/ci-gates.yml        GitHub Actions template, copied into projects (mirrors .gates.yml)
+
 setup.sh                     creates/verifies the links (all, or opencode/claude separately)
 ```
 
@@ -44,6 +48,14 @@ Known caveat: a tool that rewrites a hardlinked file via temp-file+rename save b
 spec → decomposition → explore/bulk-reader (parallel) → implementer (TDD) → gate-keeper (lint/typecheck/build/tests/SAST) → reviewer (peer review) → commit → push only on explicit request.
 
 Details: see `opencode/AGENTS.md` (source of truth).
+
+### Enforceable gates
+
+- Every project carries a `.gates.yml` at its root (format documented in `opencode/AGENTS.md`, Phase 4): the single source of lint/typecheck/build/test/sast commands. `gate-keeper` runs it verbatim; a missing file is built with the user, never discovered by guesswork.
+- SAST is non-skippable (gitleaks + the stack's audit tool). A gate run without SAST is a red gate.
+- CI: `templates/ci-gates.yml` is copied into projects as `.github/workflows/ci.yml` and kept in sync with `.gates.yml`.
+- Task state: long tasks persist their spec, decisions, todo and gate status in `docs/tasks/<slug>.md` (updated by the orchestrator; sessions read it before resuming).
+- This repo self-enforces: `githooks/pre-commit` (installed by `setup.sh` via `core.hooksPath`) runs shellcheck, a secrets scan, an English/no-accents check, and JSON validation on every commit.
 
 ## Dependencies
 

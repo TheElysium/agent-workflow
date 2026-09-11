@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# Pre-commit gate for agent-workflow itself.
+# Wired via: git config core.hooksPath githooks  (done by setup.sh)
+#
+# All checks read the STAGED content (git show :path), never the working tree.
+# Absent tools are skipped with a WARN — they never cause false failures.
+
+set -euo pipefail
+
+fail=0
+say() { printf '%s\n' "pre-commit: $*"; }
+section_fail() { fail=1; say "FAIL: $*"; }
+
+staged() { git diff --cached --name-only --diff-filter=ACMR; }
+staged_blob() { git show ":$1"; }
+
+# --- 1. shellcheck on staged shell scripts ---------------------------------
+sh_files=$(staged | grep -E '\.sh$' || true)
+if [ -n "$sh_files" ]; then
+  if command -v shellcheck >/dev/null 2>&1; then
+    for f in $sh_files; do
+      # Lint in the script's own dialect, derived from its shebang line
+      if staged_blob "$f" | head -n 1 | grep -q '^#!/bin/sh'; then dialect="sh"; else dialect="bash"; fi
+      if staged_blob "$f" | shellcheck -s "$dialect" - >/dev/null 2>&1; then
+        say "shellcheck: ok ($f)"
+      else
+        section_fail "shellcheck $f"
+      fi
+    done
+  else
+    say "WARN: shellcheck not installed — skipped (PATH=$HOME/.local/bin)"
+  fi
+fi
+
+# --- 2. secrets ------------------------------------------------------------
+secrets_fallback() { # best-effort pattern scan of ADDED lines only (matches gitleaks behavior)
+  # Lines tagged with the upstream "gitleaks:allow" marker are exempt —
+  # used by test fixtures with deliberately fake secrets.
+  if git diff --cached -U0 | grep '^+' | grep -v '^+++' | grep -v 'gitleaks:allow' | grep -InE \
+    '(ghp_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|BEGIN [A-Z ]*PRIVATE KEY)' \
+    >/dev/null 2>&1; then
+    section_fail "secret-like pattern in staged diff (install gitleaks for full coverage)"
+  else
+    say "secrets: ok (pattern fallback; install gitleaks for full coverage)"
+  fi
+}
+
+if command -v gitleaks >/dev/null 2>&1; then
+  rc=0
+  gitleaks protect --staged --redact >/dev/null 2>&1 || rc=$?
+  case "$rc" in
+    0) say "gitleaks: ok" ;;
+    1) section_fail "gitleaks found secrets in staged changes" ;;
+    *) say "WARN: gitleaks exited $rc (version quirk?) — falling back to pattern scan"; secrets_fallback ;;
+  esac
+else
+  secrets_fallback
+fi
+
+# --- 3. no accented characters in staged text files (English docs rule) ----
+# Character class written with PCRE hex escapes so the hook never matches
+# itself. Covers Latin-1 accented letters (upper and lower) plus oe ligatures;
+# multiplication and division signs are excluded on purpose.
+ACCENT_PAT='[\x{00C0}-\x{00D6}\x{00D8}-\x{00F6}\x{00F8}-\x{00FF}\x{0152}\x{0153}]'
+if printf 'a' | grep -qP 'a' 2>/dev/null; then
+  ok=1
+  txt_files=$(staged | grep -E '\.(md|sh|json|jsonc|yml|yaml|txt|ts)$' || true)
+  if [ -n "$txt_files" ]; then
+    for f in $txt_files; do
+      if staged_blob "$f" | grep -qPn "$ACCENT_PAT" 2>/dev/null; then
+        section_fail "accented characters (docs must be plain English) in: $f"; ok=""
+      fi
+    done
+    [ -n "$ok" ] && say "accents: ok"
+  fi
+else
+  say "WARN: grep without PCRE support — accent check skipped"
+fi
+
+# --- 4. staged JSON files are valid ---------------------------------------
+json_files=$(staged | grep -E '\.json$' || true)
+if [ -n "$json_files" ]; then
+  if command -v jq >/dev/null 2>&1; then
+    for f in $json_files; do
+      if staged_blob "$f" | jq empty >/dev/null 2>&1; then
+        say "json: ok ($f)"
+      else
+        section_fail "invalid JSON: $f"
+      fi
+    done
+  else
+    say "WARN: jq not installed — JSON validation skipped"
+  fi
+fi
+
+[ "$fail" = 0 ] || { say "commit blocked — fix the failures above"; exit 1; }
+say "all checks passed"

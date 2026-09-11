@@ -25,15 +25,19 @@ Multi-phase workflow applied to every project. The main conversation is the orch
 
 - Locate the spec: user message, `docs/`, `*.md` files, or issues.
 - Extract: requirements, acceptance criteria, edge cases, explicit out-of-scope.
-- Restate the spec in the plan before writing any code.
-- If the spec is ambiguous, incomplete, or missing → ask the user. Never guess requirements.
+- Restate the spec in the plan before writing any code (problem, solution, implementation decisions, out of scope). Do not hardcode file paths in the spec or PRD — they go stale fast; keep them at the `file:line` level in delegation prompts only.
+- If the spec is ambiguous, incomplete, or missing → interview the user relentlessly, one question at a time, each with your recommended answer, walking the decision tree until shared understanding. If a question can be answered by exploring the codebase, explore instead of asking. Never guess requirements.
+- Design check: sketch the modules to build or modify. Favor deep modules (rich functionality behind a small, stable, testable interface) over shallow ones; confirm the module sketch with the user before coding.
 - Delegate heavy codebase exploration to the explore / bulk-reader subagents; do not read large files yourself.
 
 ## Phase 2 — Plan
 
 - Any task with 3+ steps → todo list (TodoWrite), kept up to date in real time.
-- Decompose into delegatable, parallelizable units.
+- Decompose into vertical slices (tracer bullets): each slice cuts through every layer end-to-end (schema, API, UI, tests) and is demoable or verifiable on its own — never a horizontal slice of one layer. Prefer many thin slices over few thick ones.
+- Classify each slice: `HITL` (needs a human decision or review) or `AFK` (implementable and mergeable autonomously). Prefer AFK.
+- Order slices by dependency (blockers first).
 - For non-trivial or architectural changes, propose the approach and get agreement before coding.
+- Persist the plan: for tasks spanning multiple sessions, create `docs/tasks/<slug>.md` in the project with the extracted spec, decisions, todo state, and gate status — the orchestrator updates it as work progresses. Sessions read it before resuming.
 
 ## Phase 3 — Implement
 
@@ -46,8 +50,27 @@ Multi-phase workflow applied to every project. The main conversation is the orch
 ## Phase 4 — Verify (mandatory gate)
 
 - Gate: lint + typecheck + build + tests + SAST must pass before a task is done.
-- Discover commands from the repo (package.json, Cargo.toml, Makefile, CI configs). Never invent them; ask the user if unknown.
+- Commands come from the project's `.gates.yml` at the repo root (see below). If it is missing, build it with the user before running any gate — never discover-and-hope, never invent.
+- SAST is non-skippable: at minimum `gitleaks` (secrets) plus the stack's audit tool. A gate-keeper run that skipped SAST is a failed gate.
 - A task with a failing gate is never "done".
+
+### `.gates.yml` convention
+
+At the repo root of every project:
+
+```yaml
+stack: rust                      # free-form: rust | go | node | python | tauri...
+lint: cargo clippy -- -D warnings
+typecheck: cargo check
+build: cargo build
+test: cargo test
+sast: cargo audit && gitleaks detect
+format: cargo fmt --check        # optional
+```
+
+- `gate-keeper` reads it verbatim, runs each key, and reports a structured pass/fail per command (never interprets results).
+- Missing file → gate-keeper must ask the user for each command and offer to write the file.
+- Project CI (`.github/workflows/`) must run the same commands — template: `templates/ci-gates.yml` in agent-workflow.
 
 ## Phase 5 — Git
 
@@ -67,7 +90,7 @@ When orchestrating a substantial task:
 2. Plan with a todo list; split work into delegatable, parallelizable units. Confirm the approach with the user for non-trivial or architectural changes.
 3. Delegate coding to implementer (parallel when tasks are independent), scaffolding to code-writer.
 4. Run gate-keeper after implementation (lint/typecheck/build/tests/SAST).
-5. Send the diff to reviewer. Only commit after APPROVE + green gates.
+5. Send the diff to reviewer. After REQUEST_CHANGES, fix everything and send the corrected diff back to the same reviewer. Only commit after APPROVE on the latest diff + green gates.
 6. Commit on the task branch with Conventional Commits. Never push on your own initiative — push only when the user explicitly asks for it (a permission prompt will appear to confirm).
 
 ## Multi-agent rules
@@ -84,8 +107,9 @@ When orchestrating a substantial task:
 - `reviewer` — read-only peer review of the diff (correctness, security, complexity, style, TDD compliance). Commit only after APPROVE + green gates.
 - `explore`, `bulk-reader` — phase 1 exploration.
 - `code-writer` — test scaffolding and repetitive code matching existing patterns.
+- Re-review loop: after REQUEST_CHANGES, fix everything, then send the corrected diff back to the same reviewer (resume the session when possible). A commit requires a final APPROVE on the latest diff — an old APPROVE never carries over. Gates stay green between rounds.
 
-Flow for a substantial task: spec → decompose → explore (parallel) → implementer (TDD, parallel) → gate-keeper → reviewer → commit (no push) → next todo.
+Flow for a substantial task: spec → decompose → explore (parallel) → implementer (TDD, parallel) → gate-keeper → reviewer → fix/re-review loop → commit (no push) → next todo.
 
 ## Per-project overrides
 
