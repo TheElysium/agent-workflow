@@ -1,0 +1,44 @@
+{
+  "model": "sonnet",
+  "permissions": {
+    "ask": [
+      "Bash(git push:*)",
+      "Bash(git push)"
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "bash /c/Users/lukas/.claude/statusline-command.sh"
+  },
+  "enabledPlugins": {
+    "superpowers@claude-plugins-official": true,
+    "rust-skills@rust-skills": true,
+    "ralph-loop@claude-plugins-official": true,
+    "rust-analyzer-lsp@claude-plugins-official": true
+  },
+  "extraKnownMarketplaces": {
+    "rust-skills": {
+      "source": {
+        "source": "github",
+        "repo": "actionbook/rust-skills"
+      }
+    }
+  },
+  "language": "French",
+  "effortLevel": "medium",
+  "modelSettings": {
+    "claude-opus-5": {
+      "effortLevel": "high"
+    }
+  },
+  "autoUpdatesChannel": "latest",
+  "voice": {
+    "enabled": true,
+    "mode": "hold"
+  },
+  "theme": "dark",
+  "verbose": false,
+  "inputNeededNotifEnabled": true,
+  "agentPushNotifEnabled": true,
+  "voiceEnabled": true
+}
