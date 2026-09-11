@@ -45,13 +45,36 @@ spec → decomposition → explore/bulk-reader (parallel) → implementer (TDD) 
 
 Details: see `opencode/AGENTS.md` (source of truth).
 
+## Dependencies
+
+| Tool | Needed by | Notes |
+|------|-----------|-------|
+| Git for Windows (Git Bash) | Claude Code hooks | Hooks run via Git Bash; `bash.exe` at `C:\Windows\system32` is WSL bash, not Git Bash |
+| `jq` (Windows) | `claude/hooks/shunt.sh` | `winget install jqlang.jq` — Git Bash inherits the Windows PATH. Without it the hook fails open silently (no blocking) |
+| Node.js + npm | opencode plugins | `cd ~/.config/opencode && npm install` |
+| `bun` | opencode telemetry only | Optional if the telemetry plugin is removed |
+| `jq` + `shellcheck` (Linux, `~/.local/bin`) | dev only: test harness, linting | Optional; harness uses the WSL path fallback |
+
 ## Fresh-machine setup
 
-1. `./setup.sh` (creates the links)
-2. opencode deps: `cd ~/.config/opencode && npm install` (node_modules is not versioned)
-3. Telemetry CLI: install bun (`~/.local/bin/bun`) + wrapper `~/.local/bin/octm` pointing to `~/.config/opencode/node_modules/opencode-telemetry/bin/cli.js`
-4. Pricing patch: add `opencode/mimo-v2.5-free` (and variants) to `node_modules/opencode-telemetry/src/pricing.json` (free = 0) — ephemeral patch, redo after `npm update`
-5. Agents/opencode.jsonc reload at the next session; Claude Code re-reads `CLAUDE.md`/`settings.json` at launch
+Target: Windows host + WSL (NTFS junctions/hardlinks require both). Steps:
+
+1. **Edit the machine-specific paths first** (see below), then `./setup.sh` (creates the links)
+2. Install the dependencies above (jq via WinGet is the only non-optional one for Claude Code)
+3. opencode deps: `cd ~/.config/opencode && npm install` (node_modules is not versioned)
+4. Telemetry CLI: install bun (`~/.local/bin/bun`) + wrapper `~/.local/bin/octm` pointing to `~/.config/opencode/node_modules/opencode-telemetry/bin/cli.js`
+5. Pricing patch: add `opencode/mimo-v2.5-free` (and variants) to `node_modules/opencode-telemetry/src/pricing.json` (free = 0) — ephemeral patch, redo after `npm update`
+6. Agents/opencode.jsonc reload at the next session; Claude Code re-reads `CLAUDE.md`/`settings.json` (including hooks) at launch
+
+### Machine-specific paths (edit on a fresh machine)
+
+These paths are hardcoded to this workstation; Claude Code does not expand variables in hook/statusline commands, so they must be edited by hand:
+
+- `setup.sh` line `CL="${CLAUDE_CONFIG_DIR:-/mnt/c/Users/lukas/.claude}"` (a `CLAUDE_CONFIG_DIR` env var overrides the default)
+- `claude/settings.json`: `statusLine.command` and `hooks` command — `/c/Users/<user>/.claude/...`
+- Windows username `lukas` also appears in the mklink junction/hardlink targets resolved via `wslpath` (no edit needed, they derive from the repo location)
+
+Everything else (agents, rules, hook logic, thresholds) is machine-agnostic.
 
 ## Cross-tool sync notes
 
