@@ -1,58 +1,58 @@
 # agent-workflow
 
-Configuration versionnée du workflow de développement multi-agent pour **opencode** et **Claude Code**.
+Versioned configuration of the multi-agent development workflow for **opencode** and **Claude Code**.
 
 ## Structure
 
 ```
-opencode/                    ← ~/.config/opencode/ (symlinks WSL)
-├── AGENTS.md                Règles globales : workflow 5 phases + shunt pattern + règles multi-agent
-├── opencode.jsonc           Config : modèle principal, plugin télémétrie
-├── package.json(+lock)      Déps plugins (npm install dans ~/.config/opencode)
-├── agent/                   Agents (fork de build = orchestrator, implementer, reviewer,
+opencode/                    ← ~/.config/opencode/ (WSL symlinks)
+├── AGENTS.md                Global rules: 5-phase workflow + shunt pattern + multi-agent rules
+├── opencode.jsonc           Config: primary model, telemetry plugin
+├── package.json(+lock)      Plugin deps (npm install in ~/.config/opencode)
+├── agent/                   Agents (build fork = orchestrator, implementer, reviewer,
 │                            gate-keeper, explore, bulk-reader, code-writer)
-└── plugins/shunt.ts         Plugin shunt
+└── plugins/shunt.ts         Shunt plugin
 
-claude/                      ← /mnt/c/Users/lukas/.claude/ (junction + hardlinks NTFS)
-├── CLAUDE.md                Règles globales (miroir d'AGENTS.md, orchestration dans le main loop)
-├── settings.json            Permission ask sur git push, plugins activés
-├── statusline-command.sh    Statusline (référencé par settings.json, hardlinké dans .claude/)
+claude/                      ← /mnt/c/Users/lukas/.claude/ (NTFS junction + hardlinks)
+├── CLAUDE.md                Global rules (mirror of AGENTS.md, orchestration in the main loop)
+├── settings.json            git push ask permission, enabled plugins
+├── statusline-command.sh    Statusline (referenced by settings.json, hardlinked into .claude/)
 └── agents/                  implementer, reviewer, gate-keeper, explore, bulk-reader, code-writer
 
-setup.sh                     crée/vérifie les liens (tous, ou opencode/claude séparément)
+setup.sh                     creates/verifies the links (all, or opencode/claude separately)
 ```
 
-## Pas de sync : les configs live pointent dans le repo
+## No sync step: live configs point into the repo
 
-- **opencode** : `~/.config/opencode/{AGENTS.md,opencode.jsonc,package*.json,agent,plugins}` sont des symlinks WSL vers ce repo.
-- **Claude Code** : `.claude/CLAUDE.md` et `.claude/settings.json` sont des **hardlinks** NTFS, `.claude/agents` une **junction** — visibles côté Windows et WSL.
+- **opencode**: `~/.config/opencode/{AGENTS.md,opencode.jsonc,package*.json,agent,plugins}` are WSL symlinks into this repo.
+- **Claude Code**: `.claude/CLAUDE.md` and `.claude/settings.json` are NTFS **hardlinks**, `.claude/agents` is a **junction** — visible from both Windows and WSL.
 
-Conséquence : **le repo EST la config live**. Éditez ici, l'outil le voit immédiatement (au prochain lancement de session pour les agents).
+Consequence: **the repo IS the live config**. Edit here, the tool sees it immediately (at the next session start for agents).
 
 ```bash
-./setup.sh --check    # vérifier que tous les liens résolvent
-./setup.sh            # (re)créer tous les liens — ré-exécutable, répare ce qui a cassé
-./setup.sh opencode   # limiter aux liens opencode (idem avec claude)
+./setup.sh --check    # verify every link resolves
+./setup.sh            # (re)create all links — idempotent, repairs what broke
+./setup.sh opencode   # limit to opencode links (same for claude)
 ```
 
-Caveat connu : un outil qui réécrit un fichier hardlinké via un save temporaire+rename casse le lien (le fichier devient une copie autonome). Si `--check` est vert mais qu'un edit ne se propage pas, comparer avec `git diff`, puis ré-exécuter `./setup.sh claude`.
+Known caveat: a tool that rewrites a hardlinked file via temp-file+rename save breaks the link (the file becomes an autonomous copy). If `--check` is green but an edit does not propagate, compare with `git diff`, then re-run `./setup.sh claude`.
 
-## Workflow (résumé)
+## Workflow (summary)
 
-spec → décomposition → explore/bulk-reader (parallèle) → implementer (TDD) → gate-keeper (lint/typecheck/build/tests/SAST) → reviewer (peer review) → commit → push seulement à la demande explicite.
+spec → decomposition → explore/bulk-reader (parallel) → implementer (TDD) → gate-keeper (lint/typecheck/build/tests/SAST) → reviewer (peer review) → commit → push only on explicit request.
 
-Détails : voir `opencode/AGENTS.md` (source de vérité).
+Details: see `opencode/AGENTS.md` (source of truth).
 
-## Setup frais (nouvelle machine)
+## Fresh-machine setup
 
-1. `./setup.sh` (crée les liens)
-2. Deps opencode : `cd ~/.config/opencode && npm install` (node_modules n'est pas versionné)
-3. Telemetry CLI : installer bun (`~/.local/bin/bun`) + wrapper `~/.local/bin/octm` pointant sur `~/.config/opencode/node_modules/opencode-telemetry/bin/cli.js`
-4. Patch pricing : ajouter `opencode/mimo-v2.5-free` (et variantes) à `node_modules/opencode-telemetry/src/pricing.json` (gratuit = 0) — patch éphémère, à refaire après `npm update`
-5. Les agents/opencode.jsonc se rechargent à la prochaine session ; Claude Code relit `CLAUDE.md`/`settings.json` au lancement
+1. `./setup.sh` (creates the links)
+2. opencode deps: `cd ~/.config/opencode && npm install` (node_modules is not versioned)
+3. Telemetry CLI: install bun (`~/.local/bin/bun`) + wrapper `~/.local/bin/octm` pointing to `~/.config/opencode/node_modules/opencode-telemetry/bin/cli.js`
+4. Pricing patch: add `opencode/mimo-v2.5-free` (and variants) to `node_modules/opencode-telemetry/src/pricing.json` (free = 0) — ephemeral patch, redo after `npm update`
+5. Agents/opencode.jsonc reload at the next session; Claude Code re-reads `CLAUDE.md`/`settings.json` at launch
 
-## Notes de synchronisation entre outils
+## Cross-tool sync notes
 
-- `opencode/AGENTS.md` et `claude/CLAUDE.md` sont des copies maintenus en parallèle. Toute édition de l'un doit être portée dans l'autre (le repo les rend visibles côte à côte).
-- Divergences assumées : agents `hidden`/`temperature` opencode only ; permissions détaillées (Task, bash patterns) opencode only ; ask `git push` = permission rule côté Claude Code, champ `permission` côté opencode.
-- `claude/settings.json` est versionné sans secrets (les credentials sont dans `.credentials.json`, jamais commité).
+- `opencode/AGENTS.md` and `claude/CLAUDE.md` are copies maintained in parallel. Any edit to one must be carried into the other (the repo keeps them side by side).
+- Accepted divergences: `hidden`/`temperature` agent fields are opencode only; detailed permissions (Task, bash patterns) opencode only; `git push` ask = permission rule on the Claude Code side, `permission` field on the opencode side.
+- `claude/settings.json` is versioned without secrets (credentials live in `.credentials.json`, never committed).
