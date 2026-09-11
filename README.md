@@ -13,7 +13,7 @@ opencode/                    ← ~/.config/opencode/ (WSL symlinks)
 │                            gate-keeper, explore, bulk-reader, code-writer)
 └── plugins/shunt.ts         Shunt plugin
 
-claude/                      ← /mnt/c/Users/lukas/.claude/ (NTFS junction + hardlinks)
+claude/                      ← /mnt/c/Users/<win-user>/.claude/ (NTFS junction + hardlinks)
 ├── CLAUDE.md                Global rules (mirror of AGENTS.md, orchestration in the main loop)
 ├── settings.json            git push ask permission, hooks, enabled plugins
 ├── statusline-command.sh    Statusline (referenced by settings.json, hardlinked into .claude/)

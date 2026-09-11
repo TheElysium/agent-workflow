@@ -18,10 +18,20 @@ FAIL=0
 
 # --- fixtures -------------------------------------------------------------
 # Fixtures live on the Windows drive so that wslpath -w yields real C:\...
-# paths, exactly like the Read tool sends them in production. Override
-# SHUNT_TEST_TMP if the Windows username is not "lukas".
+# paths, exactly like the Read tool sends them in production. The base dir
+# is auto-detected from the mounted Windows drive (first profile with a
+# writable Temp); SHUNT_TEST_TMP overrides.
 
-TDIR="$(mktemp -d "${SHUNT_TEST_TMP:-/mnt/c/Users/lukas/AppData/Local/Temp}/shunt-test.XXXXXX")"
+TDIR=""
+if [ -n "${SHUNT_TEST_TMP:-}" ]; then
+  TDIR="$(mktemp -d "$SHUNT_TEST_TMP/shunt-test.XXXXXX")"
+else
+  for d in /mnt/[a-z]/Users/*/AppData/Local/Temp; do
+    if TDIR="$(mktemp -d "$d/shunt-test.XXXXXX" 2>/dev/null)"; then break; fi
+  done
+  TDIR="${TDIR:-$(mktemp -d /tmp/shunt-test.XXXXXX)}"
+fi
+TDIR_BASE="${TDIR%/*}"
 trap 'rm -rf "$TDIR"' EXIT
 
 # 400 lines, small bytes (line-threshold trigger)
@@ -33,8 +43,14 @@ trap 'rm -rf "$TDIR"' EXIT
 # ~70 KB in a single line (byte-threshold trigger, few lines)
 head -c 70000 /dev/zero | tr '\0' 'x' > "$TDIR/fat.json"
 
-# Windows-style path for the big file (hook must handle backslashes)
-WSL_BIG="$(wslpath -w "$TDIR/big.txt" 2>/dev/null || echo "$TDIR/big.txt")"   # C:\...\big.txt
+# Windows-style path for the big file (hook must handle backslashes).
+# Only meaningful when fixtures sit on a mounted Windows drive; under /tmp,
+# wslpath -w would yield a UNC path, so the backslash cases are skipped.
+ON_WIN_DRIVE=0
+if [[ "$TDIR_BASE" == /mnt/* ]]; then
+  ON_WIN_DRIVE=1
+  WSL_BIG="$(wslpath -w "$TDIR/big.txt")"   # C:\...\big.txt
+fi
 
 # --- helpers --------------------------------------------------------------
 
@@ -86,8 +102,10 @@ expect "Read big file passes with top-level agent_id (subagent)" pass \
 expect "Read missing file passes" pass \
   "$(mkinput Read "{\"file_path\":\"$TDIR/does-not-exist.txt\"}")"
 
-expect "Read via Windows backslash path is denied" deny \
-  "$(mkinput Read "{\"file_path\":\"${WSL_BIG//\\/\\\\}\"}")"
+if [ "$ON_WIN_DRIVE" = 1 ]; then
+  expect "Read via Windows backslash path is denied" deny \
+    "$(mkinput Read "{\"file_path\":\"${WSL_BIG//\\/\\\\}\"}")"
+fi
 
 # env-tuned thresholds
 expect "SHUNT_MIN_LINES=5 denies 10-line file at lower bar" deny \
@@ -125,8 +143,10 @@ expect "Bash compound command passes" pass \
 expect "Bash bat big file is denied" deny \
   "$(mkinput Bash "{\"command\":\"bat $TDIR/big.txt\"}")"
 
-expect "Bash cat Windows backslash path is denied" deny \
-  "$(mkinput Bash "{\"command\":\"cat ${WSL_BIG//\\/\\\\}\"}")"
+if [ "$ON_WIN_DRIVE" = 1 ]; then
+  expect "Bash cat Windows backslash path is denied" deny \
+    "$(mkinput Bash "{\"command\":\"cat ${WSL_BIG//\\/\\\\}\"}")"
+fi
 
 expect "Bash tail big file is denied" deny \
   "$(mkinput Bash "{\"command\":\"tail $TDIR/big.txt\"}")"
