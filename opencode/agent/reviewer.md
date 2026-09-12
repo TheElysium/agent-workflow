@@ -27,3 +27,4 @@ Rules:
 - Findings: severity (blocker / major / minor / nit), one line of rationale each, anchored with exact `file:line`.
 - No praise padding; only actionable findings.
 - Verdict first, as a single line: `APPROVE` or `REQUEST_CHANGES` (required when any blocker/major exists), followed by the findings list.
+- Re-review: when the orchestrator sends a corrected diff, re-review it fully against the original review scope (fixes often introduce new bugs). Verdict applies to the latest diff only — an old APPROVE never carries over.

@@ -14,6 +14,25 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Pre-commit gate lives in githooks/ (see check_hooks/install_hooks).
+install_hooks() {
+  if [ -d "$REPO/.git" ]; then
+    git -C "$REPO" config core.hooksPath githooks
+  fi
+}
+
+check_hooks() {
+  if [ ! -d "$REPO/.git" ]; then
+    echo "hooks: no .git dir — pre-commit gate not applicable"
+    return
+  fi
+  if [ "$(git -C "$REPO" config core.hooksPath 2>/dev/null || true)" = githooks ]; then
+    echo "hooks: core.hooksPath = githooks"
+  else
+    echo "BROKEN: core.hooksPath not set to githooks — pre-commit gate inactive"; exit 1
+  fi
+}
 OC="$HOME/.config/opencode"
 OC_REPO="$REPO/opencode"
 CMD="${CMD:-/mnt/c/Windows/System32/cmd.exe}"
@@ -89,7 +108,7 @@ preflight_claude() {
   [ -x "$CMD" ] || die "cmd.exe not found at $CMD (is WSL interop enabled?)"
   command -v wslpath >/dev/null || die "wslpath not available"
   [ -d "$REPO/claude/agents" ] || die "missing repo dir: claude/agents"
-  for f in CLAUDE.md settings.json statusline-command.sh hooks/shunt.sh; do
+  for f in CLAUDE.md AGENTS.md settings.json statusline-command.sh hooks/shunt.sh; do
     [ -f "$REPO/claude/$f" ] || die "missing repo file: claude/$f"
   done
 }
@@ -153,17 +172,17 @@ link_claude() {
     fi
   fi
   mkdir -p "$CL/hooks"               # live home for the shunt hook
-  for f in CLAUDE.md settings.json statusline-command.sh; do
+  for f in CLAUDE.md AGENTS.md settings.json statusline-command.sh; do
     link_claude_file "$CL/$f" "$REPO/claude/$f"
   done
   link_claude_file "$CL/hooks/shunt.sh" "$REPO/claude/hooks/shunt.sh"
-  echo "claude: $CL/{CLAUDE.md,settings.json,statusline-command.sh,agents,hooks/shunt.sh} -> $REPO/claude (junction + hardlinks)"
+  echo "claude: $CL/{CLAUDE.md,AGENTS.md,settings.json,statusline-command.sh,agents,hooks/shunt.sh} -> $REPO/claude (junction + hardlinks)"
 }
 
 check_claude() {
   local bad=0
   [ -n "$CL" ] || { echo "BROKEN: cannot detect the Windows user dir — set CLAUDE_CONFIG_DIR"; exit 1; }
-  for f in CLAUDE.md settings.json statusline-command.sh hooks/shunt.sh; do
+  for f in CLAUDE.md AGENTS.md settings.json statusline-command.sh hooks/shunt.sh; do
     if [ ! -f "$REPO/claude/$f" ]; then
       echo "BROKEN: repo file missing: claude/$f"; bad=1; continue
     fi
@@ -195,12 +214,14 @@ for arg in "$@"; do
 done
 
 run() { # run <action> <tool>
-  if [ "$2" = opencode ]; then
-    if [ "$1" = check ]; then check_opencode; else link_opencode; fi
+  if [ "$1" = check ]; then
+    if [ "$2" = opencode ]; then check_opencode; else check_claude; fi
   else
-    if [ "$1" = check ]; then check_claude; else link_claude; fi
+    if [ "$2" = opencode ]; then link_opencode; else link_claude; fi
   fi
 }
+
+if [ "$ACTION" = check ]; then check_hooks; else install_hooks; fi
 
 for t in opencode claude; do
   if [ "$TOOL" = all ] || [ "$TOOL" = "$t" ]; then run "$ACTION" "$t"; fi
