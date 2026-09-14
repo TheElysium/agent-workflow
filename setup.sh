@@ -200,6 +200,35 @@ check_claude() {
   fi
 }
 
+# ---------- dependency report (informational, never fatal) ----------
+# Missing tools degrade features silently later on (the shunt hook fails
+# open without jq, the secrets gate falls back to a weak pattern scan
+# without gitleaks); surface that here, at setup time. Never changes the
+# exit code — linking success is judged by the link/check functions only.
+
+deps_report() {
+  if command -v gitleaks >/dev/null 2>&1; then
+    echo "deps: gitleaks ok"
+  else
+    echo "deps: WARN gitleaks not found - pre-commit secrets gate falls back to a weak pattern scan"
+    echo "deps:       fix: install the gitleaks binary in ~/.local/bin (see README dependencies)"
+  fi
+  if command -v jq >/dev/null 2>&1; then
+    echo "deps: jq (WSL) ok"
+  else
+    echo "deps: WARN jq not found (WSL) - pre-commit JSON validation skipped"
+  fi
+  if [ "$TOOL" = all ] || [ "$TOOL" = claude ]; then
+    if [ ! -x "$CMD" ]; then
+      echo "deps: jq (Windows) unknown - cmd.exe not reachable at $CMD"
+    elif "$CMD" /c "where jq" >/dev/null 2>&1; then
+      echo "deps: jq (Windows) ok"
+    else
+      echo "deps: WARN jq not found (Windows) - shunt hook fails open (no blocking); fix: winget install jqlang.jq"
+    fi
+  fi
+}
+
 # ---------- dispatch ----------
 
 TOOL="all"
@@ -226,3 +255,5 @@ if [ "$ACTION" = check ]; then check_hooks; else install_hooks; fi
 for t in opencode claude; do
   if [ "$TOOL" = all ] || [ "$TOOL" = "$t" ]; then run "$ACTION" "$t"; fi
 done
+
+deps_report

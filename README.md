@@ -69,16 +69,17 @@ Details: see `opencode/AGENTS.md` (source of truth).
 | Tool | Needed by | Notes |
 |------|-----------|-------|
 | Git for Windows (Git Bash) | Claude Code hooks | Hooks run via Git Bash; `bash.exe` at `C:\Windows\system32` is WSL bash, not Git Bash |
-| `jq` (Windows) | `claude/hooks/shunt.sh` | `winget install jqlang.jq` — Git Bash inherits the Windows PATH. Without it the hook fails open silently (no blocking) |
+| `jq` (Windows) | `claude/hooks/shunt.sh` | `winget install jqlang.jq` — Git Bash inherits the Windows PATH. Without it the hook fails open silently (no blocking); `setup.sh` warns about it |
 | Node.js + npm | opencode plugins | `cd ~/.config/opencode && npm install` |
 | `bun` | opencode telemetry only | Optional if the telemetry plugin is removed |
 | `jq` + `shellcheck` (Linux, `~/.local/bin`) | dev only: test harness, linting | Optional; harness uses the WSL path fallback |
+| `gitleaks` (Linux, `~/.local/bin`) | `githooks/pre-commit` secrets gate | Without it the gate falls back to a weak pattern scan; `setup.sh` warns about it |
 
 ## Fresh-machine setup
 
 Target: Windows host + WSL (NTFS junctions/hardlinks require both). Steps:
 
-1. **Edit the machine-specific paths first** (see below), then `./setup.sh` (creates the links)
+1. **Edit the machine-specific paths first** (see below), then `./setup.sh` (creates the links and reports any missing dependency — jq, gitleaks — with the fix hint)
 2. Install the dependencies above (jq via WinGet is the only non-optional one for Claude Code)
 3. opencode deps: `cd ~/.config/opencode && npm install` (node_modules is not versioned)
 4. Telemetry CLI: install bun (`~/.local/bin/bun`) + wrapper `~/.local/bin/octm` pointing to `~/.config/opencode/node_modules/opencode-telemetry/bin/cli.js`
