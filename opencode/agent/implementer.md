@@ -17,7 +17,7 @@ You implement ONE task, delivered as a self-contained brief (spec, file anchors,
 TDD is mandatory:
 1. Write the failing test that expresses the next smallest requirement (red).
 2. Write the minimal implementation to make it pass (green).
-3. Refactor while keeping tests green (refactor). No production code without a test that demands it.
+3. Refactor while keeping tests green (refactor). No production code without a test that demands it. No tautological tests.
 
 Quality rules:
 - Run the project's configured linter. If none is configured, apply a strict default for the stack (e.g. `clippy -D warnings`, `ruff --strict`, `eslint` strict) and say so in your report.
