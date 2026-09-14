@@ -30,7 +30,7 @@ Never add ceremony for micro-tasks.
 - Restate the spec in the plan before writing any code (problem, solution, implementation decisions, out of scope). Do not hardcode file paths in the spec or PRD — they go stale fast; keep them at the `file:line` level in delegation prompts only.
 - If the spec is ambiguous, incomplete, or missing → interview the user relentlessly, one question at a time, each with your recommended answer, walking the decision tree until shared understanding. If a question can be answered by exploring the codebase, explore instead of asking. Never guess requirements.
 - Design check: sketch the modules to build or modify. Favor deep modules (rich functionality behind a small, stable, testable interface) over shallow ones; confirm the module sketch with the user before coding.
-- Delegate heavy codebase exploration to `explore` / `bulk-reader`; do not read large files yourself.
+- Delegate heavy codebase exploration to `explore` / `bulk-reader`; do not read large files yourself. Give `explore` a question, not a territory: "where is X computed today, and is there more than one implementation?" beats "map the X module" — a code map answers nothing, and a divergence that surfaces during implementation instead of exploration costs a re-plan mid-slice.
 
 **Output format**: the restated spec as short structured prose (Problem / Solution / Decisions / Out of scope); interview questions one at a time, each with the recommended answer.
 
@@ -39,10 +39,11 @@ Never add ceremony for micro-tasks.
 - Any task with 3+ steps → maintain a tracked todo list, kept up to date in real time.
 - Decompose into vertical slices (tracer bullets): each slice cuts through every layer end-to-end (schema, API, UI, tests) and is demoable or verifiable on its own — never a horizontal slice of one layer. Prefer many thin slices over few thick ones.
 - Classify each slice: `HITL` (needs a human decision or review) or `AFK` (implementable and mergeable autonomously). Prefer AFK.
+- HITL slices: split them so every pure decision or mapping lives in a unit-tested module and only the irreducibly manual part (actor wiring, hardware-in-the-loop) sits outside TDD — the more logic outside the manual part, the more the gate actually covers. Write the manual QA script (exact click path, expected state, expected state after undo/delete) before implementing, not after.
 - Order slices by dependency (blockers first).
 - For non-trivial or architectural changes, propose the approach and get agreement before coding.
-- Persist the plan: for tasks spanning multiple sessions, create `docs/tasks/<slug>.md` in the project with the extracted spec, decisions, todo state, and gate status — the orchestrator updates it as work progresses. Sessions read it before resuming.
-- Log subagent metrics (tokens / tool_uses / duration) as a line in `docs/tasks/<slug>.md` right when each subagent completes, not only kept in conversation context — conversation compaction erases them, and a plan file is the only durable record for later cost/latency review.
+- Persist the plan: for tasks spanning multiple sessions, create `docs/tasks/<slug>.md` in the project with the extracted spec, decisions, todo state, and gate status — the orchestrator updates it as work progresses. Sessions read it before resuming. The status header (current slice, commit, next step) is updated in the same commit as the slice it describes — treat it like a version bump, not a follow-up edit; it is the first thing a resuming session reads and the easiest thing to leave stale.
+- Log subagent metrics (tokens / tool_uses / duration) as a line in `docs/tasks/<slug>.md` right when each subagent completes, not only kept in conversation context — conversation compaction erases them, and a plan file is the only durable record for later cost/latency review. Every subagent, every round — gate-keeper and re-review rounds included. Log at completion, never reconstruct after compaction.
 
 **Output format**: a tracked todo list (todo tool), slices listed with their `HITL`/`AFK` label and their dependency order — no narrative paragraph.
 
@@ -59,7 +60,7 @@ Never add ceremony for micro-tasks.
 ## Phase 4 — Verify (mandatory gate)
 
 - Gate: lint + typecheck + build + tests + SAST must pass before a task is done.
-- Commands come from the project's `.gates.yml` at the repo root (see below). If it is missing, build it with the user before running any gate — never discover-and-hope, never invent.
+- Commands come from the project's `.gates.yml` at the repo root (see below). If it is missing, creating it with the user is the first action of the session — before implementation, not at the first gate run. Never run gates from a command list hand-copied into prompts; that is how a command silently goes missing between slices.
 - SAST is non-skippable: at minimum `gitleaks` (secrets) plus the stack's audit tool. A gate-keeper run that skipped SAST is a failed gate.
 - A task with a failing gate is never "done".
 
@@ -79,9 +80,10 @@ format: cargo fmt --check        # optional
 
 - `gate-keeper` reads it verbatim, runs each key, and reports a structured pass/fail per command (never interprets results).
 - Missing file → gate-keeper must ask the user for each command and offer to write the file.
+- Accepted gaps are recorded in `.gates.yml` itself, as a comment on the affected key naming the decision and its date (e.g. `# gitleaks not installed — gap accepted by user 2026-09-14, tracked in docs/tasks/<slug>.md`). A RED on a non-skippable step is surfaced and decided the first time it appears; a workaround repeated across two slices is either fixed or recorded as an accepted gap — never carried as a habit.
 - Local enforcement is the default: gates are enforced by `gate-keeper` before a task is done and before commit — no CI needed. Adding the CI layer is optional and only for projects whose CI you control (copy `templates/ci-gates.yml` from agent-workflow as `.github/workflows/ci.yml`, keep it in sync with `.gates.yml`).
 - Dispatch `gate-keeper` as its own explicit step after every `implementer` run, even for a slice that looks trivial — never let the `reviewer` or the orchestrator absorb the gate run informally. A dedicated gate-keeper dispatch costs ~15-20k tokens and a minute; a correction found late by the reviewer costs more.
-- When a slice is UI/visual work (CSS, layout, positioning) that no automated gate can catch, add an explicit manual-QA todo item (e.g. "run the app, click through X") instead of leaving verification implicit — it must show up as a pending item, not be silently skipped.
+- When a slice is UI/visual work (CSS, layout, positioning) that no automated gate can catch, add an explicit manual-QA todo item (e.g. "run the app, click through X") instead of leaving verification implicit — it must show up as a pending item, not be silently skipped. An open manual-QA item on a surface blocks starting the next slice that builds on that same surface.
 
 **Output format**: a structured pass/fail table per `.gates.yml` command, with no interpretation or rephrasing of the results.
 
@@ -98,7 +100,7 @@ format: cargo fmt --check        # optional
 
 - Subagents start with a fresh context: every delegation prompt must be self-contained (extracted spec, exact task, `file:line` anchors, stack conventions, acceptance criteria). Never rely on session context.
 - Subagent outputs: structured bullets only, no file dumps.
-- Launch independent delegations in the same message to parallelize.
+- Launch independent delegations in the same message to parallelize. `gate-keeper` and `reviewer` are both read-only on the same tree — dispatch them in parallel after implementation.
 - When splitting parallel `implementer` work, balance by estimated workload (e.g. backend + bindings + one UI surface vs. a second UI surface alone can be lopsided), not only by file-ownership independence — an uneven split keeps the critical path as long as the heaviest task even though the work looks parallelized.
 - Keep agent definitions stable (favors prompt caching).
 
@@ -106,10 +108,10 @@ format: cargo fmt --check        # optional
 
 - `implementer` — writes code in strict TDD for a given task. Use for substantial coding work, in parallel when tasks are independent.
 - `gate-keeper` — runs verification commands only (lint/typecheck/build/tests/SAST), reports structured pass/fail. Use after implementation.
-- `reviewer` — read-only peer review of the diff (correctness, security, complexity, style, TDD compliance). Commit only after APPROVE + green gates.
+- `reviewer` — read-only peer review of the diff (correctness, security, complexity, style, TDD compliance). Its distinctive catch is cross-layer inconsistency: two layers each internally correct but owning the same fact differently — no gate catches that. Commit only after APPROVE + green gates.
 - `explore`, `bulk-reader` — phase 1 exploration.
 - `code-writer` — test scaffolding and repetitive code matching existing patterns.
-- Re-review loop: after REQUEST_CHANGES, fix everything, then send the corrected diff back to the same reviewer (resume the session when possible). A commit requires a final APPROVE on the latest diff — an old APPROVE never carries over. Gates stay green between rounds.
+- Re-review loop: after REQUEST_CHANGES, fix everything, then send the corrected diff back to the same reviewer (resume the session when possible). A commit requires a final APPROVE on the latest diff — an old APPROVE never carries over. Gates stay green between rounds. Review fixes go through TDD too: edit or add the test first, watch it fail, then change the implementation — "it is only a small fix" is exactly when the red step gets skipped, and it is how a test the old code passes by accident goes unnoticed.
 
 Flow for a substantial task: spec → decompose → explore (parallel) → implementer (TDD, parallel) → gate-keeper → reviewer → fix/re-review loop → commit (no push) → next todo.
 
