@@ -115,6 +115,7 @@ format: cargo fmt --check        # optional
 - Subagents start with a fresh context: every delegation prompt must be self-contained (extracted spec, exact task, `file:line` anchors, stack conventions, acceptance criteria). Never rely on session context.
 - Subagent outputs: structured bullets only, no file dumps.
 - Launch independent delegations in the same message to parallelize. `gate-keeper` and `reviewer` are both read-only on the same tree — dispatch them in parallel after implementation.
+- Reviewer delegation: every reviewer prompt includes the output of `scripts/review-checklist.sh` (deterministic, per-file checklist) plus the spec/acceptance criteria; the reviewer must cover every listed file. Checklist > ~10 files → split into parallel `reviewer` runs, each with its own sub-checklist; aggregate verdicts (a single REQUEST_CHANGES blocks). LLM review never enters `.gates.yml` — gates stay reproducible.
 - When splitting parallel `implementer` work, balance by estimated workload, not only file ownership — an uneven split keeps the critical path as long as the heaviest task.
 - Parallel hypothesis testing (optional, expensive): for major architectural decisions on HITL slices, explore 2–3 candidate designs via parallel `implementer` runs against throwaway branches, then evaluate and keep the best. Never use by default — the cost must be justified by the decision's irreversibility.
 - Keep agent definitions stable (favors prompt caching).
