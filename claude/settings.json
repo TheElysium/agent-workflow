@@ -1,5 +1,4 @@
 {
-  "model": "sonnet",
   "permissions": {
     "ask": [
       "Bash(git push:*)",
@@ -38,21 +37,5 @@
       }
     }
   },
-  "language": "French",
-  "effortLevel": "medium",
-  "modelSettings": {
-    "claude-opus-5": {
-      "effortLevel": "high"
-    }
-  },
-  "autoUpdatesChannel": "latest",
-  "voice": {
-    "enabled": true,
-    "mode": "hold"
-  },
-  "theme": "dark",
-  "verbose": false,
-  "inputNeededNotifEnabled": true,
-  "agentPushNotifEnabled": true,
-  "voiceEnabled": true
+  "language": "French"
 }

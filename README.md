@@ -38,7 +38,7 @@ setup.sh                     creates/verifies the links (all, or opencode/claude
 
 - **Root**: `AGENTS.md` is the single canonical copy of the workflow rules. `opencode/AGENTS.md` and `claude/AGENTS.md` are NTFS hardlinks to it (same inode, three paths) — editing any one of the three edits all of them, in-repo and live.
 - **opencode**: `~/.config/opencode/{AGENTS.md,opencode.jsonc,package*.json,agent,plugins}` are WSL symlinks into this repo.
-- **Claude Code**: `.claude/CLAUDE.md` and `.claude/AGENTS.md` and `.claude/settings.json` are NTFS **hardlinks**, `.claude/agents` is a **junction**, `.claude/hooks/shunt.sh` is a hardlink — visible from both Windows and WSL. `CLAUDE.md` itself is just `@AGENTS.md` (Claude Code's file-import syntax): it has no content of its own, it pulls in the shared file at load time.
+- **Claude Code**: `.claude/CLAUDE.md`, `.claude/AGENTS.md` and `.claude/statusline-command.sh` are NTFS **hardlinks**, `.claude/agents` is a **junction**, `.claude/hooks/shunt.sh` is a hardlink — visible from both Windows and WSL. `CLAUDE.md` itself is just `@AGENTS.md` (Claude Code's file-import syntax): it has no content of its own, it pulls in the shared file at load time. `.claude/settings.json` is **merged, not linked**: `setup.sh` deep-merges the repo's structural keys (hooks, permissions, statusLine, plugins) into the live file — repo wins on conflicts — while Claude Code keeps ownership of session preferences (model, theme, plugin toggles); the repo file therefore carries only structural keys.
 
 Consequence: **the repo IS the live config**. Edit here, the tool sees it immediately (at the next session start for agents).
 
