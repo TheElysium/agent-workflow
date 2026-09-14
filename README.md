@@ -15,10 +15,10 @@ CLAUDE.md                    ← one line: @AGENTS.md (Claude Code import syntax
 ├── settings.local.json      ← created locally, gitignored; not part of the kit copy
 ├── statusline-command.sh    ← referenced by settings.json
 ├── hooks/shunt.sh           ← PreToolUse shunt hook + hooks/test-shunt.sh
-└── agents/                  ← implementer, reviewer, gate-keeper, explore, bulk-reader, code-writer
+└── agents/                  ← implementer, reviewer, gate-keeper, explore, bulk-reader, code-writer, spec-critic
 
 .opencode/                   ← copy into the project root
-├── agent/                   ← build, implementer, reviewer, gate-keeper, explore, bulk-reader, code-writer
+├── agent/                   ← build, implementer, reviewer, gate-keeper, explore, bulk-reader, code-writer, spec-critic
 └── plugins/shunt.ts         ← shunt plugin
 
 .gates.yml                   ← lint / typecheck / build / test / sast / format commands
@@ -42,7 +42,9 @@ This repo itself uses its own kit (auto-dogfooding). Beyond the kit it carries `
 
 ## Workflow (summary)
 
-spec → decomposition → explore/bulk-reader (parallel) → implementer (TDD) → gate-keeper (lint/typecheck/build/tests/SAST) → reviewer (peer review) → commit → push only on explicit request.
+Task routing: T0 direct → T1 lightweight → T2 orchestrated (criteria: files touched, risk, API surface, architectural impact).
+
+T2 flow: spec (→ spec-critic on non-trivial specs) → decomposition → explore/bulk-reader (parallel) → implementer (evidence-first: TDD for behavior changes, suite green + typecheck for mechanical changes) → gate-keeper (lint/typecheck/build/tests/SAST) → reviewer (peer review + intent gate) → commit → push only on explicit request. Two gates: engineering (`.gates.yml`) and intent (spec vs implementation).
 
 Details: see `AGENTS.md`.
 

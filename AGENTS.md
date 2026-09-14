@@ -16,14 +16,19 @@ The primary model is expensive. Delegate I/O-heavy work to cheap subagents inste
 
 # Development workflow
 
-Multi-phase workflow applied to every project. The main session (the `build` agent in opencode) is the default orchestrator. Two operating modes:
-- **Interactive**: small tasks, quick fixes, questions — act directly, no delegation ceremony.
-- **Orchestrated**: substantial tasks — decompose, delegate, verify, review (parallelizable work, peer review, heavy I/O).
+Multi-phase workflow applied to every project. The main session (the `build` agent in opencode) is the default orchestrator. Route every task to one of three levels, based on objective criteria — never on gut feeling:
+
+- **T0 direct**: 1 file, low risk, no API surface touched (typo, comment, quick fix) — act directly, no delegation ceremony.
+- **T1 lightweight**: 2–3 files, existing tests can serve as proof (small feature on an existing surface, targeted refactor) — orchestrator implements, gate-keeper runs, reviewer at discretion.
+- **T2 orchestrated**: architecture, auth, DB, public API surface, or security touched; or 3+ files with new behavior — full workflow: decompose, delegate, gate, review (parallelizable work, peer review, heavy I/O).
+
+Routing criteria: number of files touched, risk (security/auth/DB/data loss), API surface changed, architectural impact. When in doubt, route one level up.
 
 ## Phase 1 — Understand & Spec
 
 - Locate the spec: user message, `docs/`, `*.md` files, or issues.
 - Extract: requirements, acceptance criteria, edge cases, explicit out-of-scope.
+- Non-trivial spec (T1 with new behavior, T2, architectural impact) → dispatch `spec-critic` on the extracted spec before planning. `STRUCTURED` → proceed. `NEEDS_CLARIFICATION` → interview the user with its question list. Skip for T0 (cost exceeds value).
 - Restate the spec in the plan before writing any code (problem, solution, implementation decisions, out of scope). Do not hardcode file paths in the spec or PRD — keep them at the `file:line` level in delegation prompts only.
 - If the spec is ambiguous, incomplete, or missing → interview the user, one question at a time, each with your recommended answer. If a question can be answered by exploring the codebase, explore instead of asking. Never guess requirements.
 - Design check: sketch the modules to build or modify. Favor deep modules (rich functionality behind a small, stable, testable interface); confirm the sketch with the user before coding.
@@ -40,13 +45,24 @@ Multi-phase workflow applied to every project. The main session (the `build` age
 - Order slices by dependency (blockers first).
 - For non-trivial or architectural changes, propose the approach and get agreement before coding.
 - Persist the plan: for tasks spanning multiple sessions, create `docs/tasks/<slug>.md` with the extracted spec, decisions, todo state, and gate status. Sessions read it before resuming. The status header (current slice, commit, next step) is updated in the same commit as the slice it describes — never as a follow-up edit.
-- Log subagent metrics (tokens / tool_uses / duration) as a line in `docs/tasks/<slug>.md` at each subagent's completion — every subagent, every round, gate-keeper and re-review included. Conversation compaction erases them; the plan file is the only durable record.
+- Memory is compressed, not accumulated. On task closure, compress `docs/tasks/<slug>.md` down to the durable outcome (final spec, decisions, retrospective lessons) and mark it archived; only open tasks stay as live plan files. Never grow an exhaustive journal — the file must shrink to knowledge at closure.
+- Log subagent metrics as a line in `docs/tasks/<slug>.md` at each subagent's completion — every subagent, every round, gate-keeper and re-review included. Format: `subagent | tokens | tool_uses | duration | retries | review_iterations | gate_failures | outcome`. Conversation compaction erases them; the plan file is the only durable record. These lines aggregate into cost per successful task (tokens spent per mergeable change) — not cost per agent.
 
 **Output format**: a tracked todo list (todo tool), slices with `HITL`/`AFK` labels and dependency order — no narrative paragraph.
 
 ## Phase 3 — Implement
 
-- TDD is mandatory: red-green-refactor. No production code without a test that demands it.
+- Evidence-first implementation is mandatory: no significant change without verifiable proof. TDD (red-green-refactor) is the default proof for behavior-changing code, but the proof form must match the change type:
+
+| Change type | Required proof |
+|---|---|
+| Business logic, API, parsing, algorithms, services | TDD: red → green → refactor |
+| Mechanical refactor, config, migrations, code deletion | Existing suite green + typecheck (behavior unchanged) |
+| Pure UI / visual work | Manual-QA script (written before implementing) |
+| Prototype / throwaway | Proof form declared explicitly in the spec |
+| Review fixes | Edit the test first, watch it fail, then fix (TDD again) |
+
+- Review fixes go through TDD too: edit the test first, watch it fail, then change the implementation.
 - Lint: follow the project's configured linter; if none, apply a strict default for the stack (e.g. `clippy -D warnings`, `ruff --strict`, `eslint` strict) and tell the user.
 - Cyclomatic complexity: target ≤ 10 per function. Above the threshold → refactor or explicitly justify.
 - Apply the stack's formatter.
@@ -56,10 +72,12 @@ Multi-phase workflow applied to every project. The main session (the `build` age
 
 ## Phase 4 — Verify (mandatory gate)
 
-- Gate: lint + typecheck + build + tests + SAST must pass before a task is done.
-- Commands come from the project's `.gates.yml` at the repo root (see below). If it is missing, creating it with the user is the first action of the session — before implementation, not at the first gate run. Never run gates from a command list hand-copied into prompts.
+- Two distinct gates; both must pass before a task is done:
+  - **Engineering gate** — lint + typecheck + build + tests + SAST, run by `gate-keeper`.
+  - **Intent gate** — does the implementation satisfy the user's intent (acceptance criteria, edge cases, no out-of-scope changes)? Carried by the `reviewer` (dimension 1); the delegation prompt must always provide the spec/acceptance criteria.
+- Gate commands come from the project's `.gates.yml` at the repo root (see below). If it is missing, creating it with the user is the first action of the session — before implementation, not at the first gate run. Never run gates from a command list hand-copied into prompts.
 - SAST is non-skippable: at minimum `gitleaks` (secrets) plus the stack's audit tool. A gate-keeper run that skipped SAST is a failed gate.
-- A task with a failing gate is never "done".
+- A task with a failing gate (engineering or intent) is never "done".
 
 ### `.gates.yml` convention
 
@@ -98,13 +116,15 @@ format: cargo fmt --check        # optional
 - Subagent outputs: structured bullets only, no file dumps.
 - Launch independent delegations in the same message to parallelize. `gate-keeper` and `reviewer` are both read-only on the same tree — dispatch them in parallel after implementation.
 - When splitting parallel `implementer` work, balance by estimated workload, not only file ownership — an uneven split keeps the critical path as long as the heaviest task.
+- Parallel hypothesis testing (optional, expensive): for major architectural decisions on HITL slices, explore 2–3 candidate designs via parallel `implementer` runs against throwaway branches, then evaluate and keep the best. Never use by default — the cost must be justified by the decision's irreversibility.
 - Keep agent definitions stable (favors prompt caching).
 
 ### Agent roster
 
-- `implementer` — substantial coding in strict TDD; parallelize on independent tasks.
+- `spec-critic` — challenges the spec before planning; on non-trivial specs (T1 with new behavior, T2).
+- `implementer` — substantial coding; proof form per Phase 3 evidence table; parallelize on independent tasks.
 - `gate-keeper` — verification commands only; after every implementation.
-- `reviewer` — read-only peer review of the diff; its distinctive catch is cross-layer inconsistency no gate can catch. Commit only after APPROVE + green gates.
+- `reviewer` — read-only peer review of the diff; carries the intent gate (dimension 1) and catches cross-layer inconsistency no gate can catch. Commit only after APPROVE + green gates.
 - `explore`, `bulk-reader` — phase 1 exploration.
 - `code-writer` — test scaffolding and repetitive code matching existing patterns.
 - Re-review loop: after REQUEST_CHANGES, fix everything, then send the corrected diff back to the same reviewer (resume the session when possible). A commit requires a final APPROVE on the latest diff — an old APPROVE never carries over; gates stay green between rounds. Review fixes go through TDD too: edit the test first, watch it fail, then change the implementation.
