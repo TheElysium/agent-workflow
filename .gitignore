@@ -3,3 +3,4 @@ node_modules/
 reports/
 .claude/settings.local.json
 .opencode/settings.local.json
+.usage/
