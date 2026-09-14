@@ -64,6 +64,14 @@ Details: see `opencode/AGENTS.md` (source of truth).
 - Task state: long tasks persist their spec, decisions, todo and gate status in `docs/tasks/<slug>.md` (updated by the orchestrator; sessions read it before resuming).
 - This repo self-enforces: `githooks/pre-commit` (installed by `setup.sh` via `core.hooksPath`) runs shellcheck, a secrets scan, an English/no-accents check, and JSON validation on every commit.
 
+## Per-project overrides
+
+To adapt an agent to a stack (e.g. Rust for a Tauri project), place a same-name/id file in the project:
+- Claude Code: `.claude/agents/<name>.md`
+- opencode: `.opencode/agent/<id>.md` (definitions merge: scalar fields replaced, permission rules appended)
+
+The global definition is the base; the project file only adds stack specifics.
+
 ## Dependencies
 
 | Tool | Needed by | Notes |
