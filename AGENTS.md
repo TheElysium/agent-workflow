@@ -32,6 +32,8 @@ Never add ceremony for micro-tasks.
 - Design check: sketch the modules to build or modify. Favor deep modules (rich functionality behind a small, stable, testable interface) over shallow ones; confirm the module sketch with the user before coding.
 - Delegate heavy codebase exploration to `explore` / `bulk-reader`; do not read large files yourself.
 
+**Output format**: the restated spec as short structured prose (Problem / Solution / Decisions / Out of scope); interview questions one at a time, each with the recommended answer.
+
 ## Phase 2 — Plan
 
 - Any task with 3+ steps → maintain a tracked todo list, kept up to date in real time.
@@ -40,6 +42,9 @@ Never add ceremony for micro-tasks.
 - Order slices by dependency (blockers first).
 - For non-trivial or architectural changes, propose the approach and get agreement before coding.
 - Persist the plan: for tasks spanning multiple sessions, create `docs/tasks/<slug>.md` in the project with the extracted spec, decisions, todo state, and gate status — the orchestrator updates it as work progresses. Sessions read it before resuming.
+- Log subagent metrics (tokens / tool_uses / duration) as a line in `docs/tasks/<slug>.md` right when each subagent completes, not only kept in conversation context — conversation compaction erases them, and a plan file is the only durable record for later cost/latency review.
+
+**Output format**: a tracked todo list (todo tool), slices listed with their `HITL`/`AFK` label and their dependency order — no narrative paragraph.
 
 ## Phase 3 — Implement
 
@@ -48,6 +53,8 @@ Never add ceremony for micro-tasks.
 - Cyclomatic complexity: target ≤ 10 per function (lizard, radon, gocyclo, clippy cognitive complexity). Above the threshold → refactor or explicitly justify.
 - Apply the stack's formatter.
 - Run SAST tooling when available (cargo clippy/audit, npm audit, semgrep, gitleaks, gosec...). If the tool is not installed, propose installing it — never skip silently.
+
+**Output format**: a summarized diff (files touched + why), never a full code dump in the reply — the code lives in the files.
 
 ## Phase 4 — Verify (mandatory gate)
 
@@ -73,6 +80,10 @@ format: cargo fmt --check        # optional
 - `gate-keeper` reads it verbatim, runs each key, and reports a structured pass/fail per command (never interprets results).
 - Missing file → gate-keeper must ask the user for each command and offer to write the file.
 - Local enforcement is the default: gates are enforced by `gate-keeper` before a task is done and before commit — no CI needed. Adding the CI layer is optional and only for projects whose CI you control (copy `templates/ci-gates.yml` from agent-workflow as `.github/workflows/ci.yml`, keep it in sync with `.gates.yml`).
+- Dispatch `gate-keeper` as its own explicit step after every `implementer` run, even for a slice that looks trivial — never let the `reviewer` or the orchestrator absorb the gate run informally. A dedicated gate-keeper dispatch costs ~15-20k tokens and a minute; a correction found late by the reviewer costs more.
+- When a slice is UI/visual work (CSS, layout, positioning) that no automated gate can catch, add an explicit manual-QA todo item (e.g. "run the app, click through X") instead of leaving verification implicit — it must show up as a pending item, not be silently skipped.
+
+**Output format**: a structured pass/fail table per `.gates.yml` command, with no interpretation or rephrasing of the results.
 
 ## Phase 5 — Git
 
@@ -81,11 +92,14 @@ format: cargo fmt --check        # optional
 - Committing without asking is allowed (on the task branch).
 - Push only when the user explicitly asks for it (a permission prompt will confirm). No force-push, no hook bypass, no secrets in commits.
 
+**Output format**: the commit message in strict Conventional Commits, one summary line followed by short bullets when needed — no recap outside the message itself.
+
 ## Multi-agent rules
 
 - Subagents start with a fresh context: every delegation prompt must be self-contained (extracted spec, exact task, `file:line` anchors, stack conventions, acceptance criteria). Never rely on session context.
 - Subagent outputs: structured bullets only, no file dumps.
 - Launch independent delegations in the same message to parallelize.
+- When splitting parallel `implementer` work, balance by estimated workload (e.g. backend + bindings + one UI surface vs. a second UI surface alone can be lopsided), not only by file-ownership independence — an uneven split keeps the critical path as long as the heaviest task even though the work looks parallelized.
 - Keep agent definitions stable (favors prompt caching).
 
 ### Agent roster
@@ -98,6 +112,10 @@ format: cargo fmt --check        # optional
 - Re-review loop: after REQUEST_CHANGES, fix everything, then send the corrected diff back to the same reviewer (resume the session when possible). A commit requires a final APPROVE on the latest diff — an old APPROVE never carries over. Gates stay green between rounds.
 
 Flow for a substantial task: spec → decompose → explore (parallel) → implementer (TDD, parallel) → gate-keeper → reviewer → fix/re-review loop → commit (no push) → next todo.
+
+## Project init hygiene
+
+- At the start of any new project (before the first commit), add `templates/gitignore-claude-local.txt` from agent-workflow to the project's `.gitignore` — `.claude/settings.local.json` / `.opencode/settings.local.json` are machine-local and must never be committed.
 
 ## Per-project overrides
 
