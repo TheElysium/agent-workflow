@@ -1,4 +1,4 @@
 stack: shell
-lint: shellcheck githooks/pre-commit githooks/test-pre-commit.sh setup.sh
+lint: shellcheck githooks/pre-commit githooks/test-pre-commit.sh .claude/hooks/shunt.sh .claude/hooks/test-shunt.sh .claude/statusline-command.sh
 test: bash githooks/test-pre-commit.sh
 sast: gitleaks detect --no-banner --redact

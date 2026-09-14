@@ -1,4 +1,5 @@
 node_modules/
 *.db
 reports/
-.claude/
+.claude/settings.local.json
+.opencode/settings.local.json

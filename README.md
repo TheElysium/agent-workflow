@@ -1,69 +1,58 @@
 # agent-workflow
 
-Versioned configuration of the multi-agent development workflow for **opencode** and **Claude Code**.
+Versioned, copy-paste kit for the multi-agent development workflow with **opencode** and **Claude Code**.
 
 ## Structure
 
 ```
 AGENTS.md                    ← single source of truth: 5-phase workflow + shunt pattern +
-                              multi-agent rules. Three independent in-repo copies (root,
-                              opencode/, claude/) kept identical — the pre-commit
-                              agents-sync hook fails the commit on drift.
+                               multi-agent rules. opencode reads this from the project root.
 
-opencode/                    ← ~/.config/opencode/ (WSL symlinks)
-├── AGENTS.md                copy of ../AGENTS.md (opencode reads this natively)
-├── opencode.jsonc           Config: primary model, telemetry plugin
-├── package.json(+lock)      Plugin deps (npm install in ~/.config/opencode)
-├── agent/                   Agents (build fork = orchestrator, implementer, reviewer,
-│                            gate-keeper, explore, bulk-reader, code-writer)
-└── plugins/shunt.ts         Shunt plugin
+CLAUDE.md                    ← one line: @AGENTS.md (Claude Code import syntax)
 
-claude/                      ← /mnt/c/Users/<win-user>/.claude/ (NTFS junction + hardlinks)
-├── CLAUDE.md                One line: `@AGENTS.md` (Claude Code import syntax)
-├── AGENTS.md                copy of ../AGENTS.md (hardlinked into the live .claude/)
-├── settings.json            git push ask permission, hooks, enabled plugins
-├── statusline-command.sh    Statusline (referenced by settings.json, hardlinked into .claude/)
-├── hooks/shunt.sh           Shunt hook (PreToolUse: blocks oversized non-targeted reads)
-│                            + hooks/test-shunt.sh (test harness, 20 cases)
-└── agents/                  implementer, reviewer, gate-keeper, explore, bulk-reader, code-writer
+.claude/                     ← copy into the project root
+├── settings.json            ← structural keys only (permissions, hooks, statusLine)
+├── settings.local.json      ← created locally, gitignored; not part of the kit copy
+├── statusline-command.sh    ← referenced by settings.json
+├── hooks/shunt.sh           ← PreToolUse shunt hook + hooks/test-shunt.sh
+└── agents/                  ← implementer, reviewer, gate-keeper, explore, bulk-reader, code-writer
 
-githooks/pre-commit           self-gate of this repo (shellcheck, secrets, accents, JSON)
-githooks/test-pre-commit.sh   smoke tests for the pre-commit gate
-templates/ci-gates.yml        GitHub Actions template, copied into projects (mirrors .gates.yml); optional — only for projects whose CI you control
+.opencode/                   ← copy into the project root
+├── agent/                   ← build, implementer, reviewer, gate-keeper, explore, bulk-reader, code-writer
+└── plugins/shunt.ts         ← shunt plugin
 
-setup.sh                     creates/verifies the links (all, or opencode/claude separately)
+.gates.yml                   ← lint / typecheck / build / test / sast / format commands
+.github/workflows/ci.yml     ← optional CI mirror of .gates.yml
+
+githooks/                    ← this repo's self-gate only (pre-commit + tests), not shipped to projects
+README.md
+LICENSE
 ```
 
-## No sync step: live configs point into the repo
+## Install
 
-- **AGENTS.md**: three independent in-repo copies (root, `opencode/AGENTS.md`, `claude/AGENTS.md`) — root is canonical, the pre-commit `agents-sync` hook enforces identity. Edit the root copy and mirror to the other two in the same commit; the hook catches drift at commit time, not the filesystem at edit time.
-- **opencode**: `~/.config/opencode/{AGENTS.md,opencode.jsonc,package*.json,agent,plugins}` are WSL symlinks into this repo.
-- **Claude Code**: `.claude/CLAUDE.md`, `.claude/AGENTS.md` and `.claude/statusline-command.sh` are NTFS **hardlinks**, `.claude/agents` is a **junction**, `.claude/hooks/shunt.sh` is a hardlink — visible from both Windows and WSL. `CLAUDE.md` itself is just `@AGENTS.md` (Claude Code's file-import syntax): it has no content of its own, it pulls in the shared file at load time. `.claude/settings.json` is **merged, not linked**: `setup.sh` deep-merges the repo's structural keys (hooks, permissions, statusLine, plugins) into the live file — repo wins on conflicts — while Claude Code keeps ownership of session preferences (model, theme, plugin toggles); the repo file therefore carries only structural keys.
-
-Consequence: **the repo IS the live config**. Edit here, the tool sees it immediately (at the next session start for agents).
+Copy the kit into a new or existing project root:
 
 ```bash
-./setup.sh --check    # verify every link resolves
-./setup.sh            # (re)create all links — idempotent, repairs what broke
-./setup.sh opencode   # limit to opencode links (same for claude)
+cp -r AGENTS.md CLAUDE.md .claude .opencode /path/to/project/
+cd /path/to/project
 ```
 
-Known caveats:
-- A tool that rewrites a hardlinked file via temp-file+rename save breaks the link (the file becomes an autonomous copy). Not hypothetical: every Claude Code edit session that touches `.claude/AGENTS.md` produces it — `setup.sh` backs the drifted copy up as `AGENTS.md.bak.<epoch>`. If `--check` goes red or an edit does not propagate, compare with `git diff`, then re-run `./setup.sh claude`.
+This repo itself uses its own kit (auto-dogfooding). Beyond the kit it carries `githooks/` and `.gates.yml` for its own self-gate (wired with `git config core.hooksPath githooks` here only); projects may mirror the gate pattern with their own `.gates.yml` + pre-commit, but they are not part of the copy.
 
 ## Workflow (summary)
 
 spec → decomposition → explore/bulk-reader (parallel) → implementer (TDD) → gate-keeper (lint/typecheck/build/tests/SAST) → reviewer (peer review) → commit → push only on explicit request.
 
-Details: see `opencode/AGENTS.md` (source of truth).
+Details: see `AGENTS.md`.
 
 ### Enforceable gates
 
-- Every project carries a `.gates.yml` at its root (format documented in `opencode/AGENTS.md`, Phase 4): the single source of lint/typecheck/build/test/sast commands. `gate-keeper` runs it verbatim; a missing file is built with the user, never discovered by guesswork.
+- Every project carries a `.gates.yml` at its root (format documented in `AGENTS.md`, Phase 4): the single source of lint/typecheck/build/test/sast commands. `gate-keeper` runs it verbatim; a missing file is built with the user, never discovered by guesswork.
 - SAST is non-skippable (gitleaks + the stack's audit tool). A gate run without SAST is a red gate.
-- Enforcement is local-only by default: `@gate-keeper` blocks a task before it is done and before commit. The CI layer (`templates/ci-gates.yml` copied into a project as `.github/workflows/ci.yml`, kept in sync with `.gates.yml`) is optional — only for projects whose CI you control (pro projects with team-owned CI skip it).
+- Enforcement is local-only by default: `@gate-keeper` blocks a task before it is done and before commit. The CI layer (`.github/workflows/ci.yml` mirroring `.gates.yml`) is optional — only for projects whose CI you control.
 - Task state: long tasks persist their spec, decisions, todo and gate status in `docs/tasks/<slug>.md` (updated by the orchestrator; sessions read it before resuming).
-- This repo self-enforces: `githooks/pre-commit` (installed by `setup.sh` via `core.hooksPath`) runs shellcheck, a secrets scan, an English/no-accents check, and JSON validation on every commit.
+- This repo self-enforces: `githooks/pre-commit` (activate with `git config core.hooksPath githooks`) runs shellcheck, a secrets scan, an English/no-accents check, JSON validation, and the `CLAUDE.md == @AGENTS.md` check on every commit.
 
 ## Per-project overrides
 
@@ -71,43 +60,29 @@ To adapt an agent to a stack (e.g. Rust for a Tauri project), place a same-name/
 - Claude Code: `.claude/agents/<name>.md`
 - opencode: `.opencode/agent/<id>.md` (definitions merge: scalar fields replaced, permission rules appended)
 
-The global definition is the base; the project file only adds stack specifics.
+The kit definition is the base; the project file only adds stack specifics.
 
 ## Dependencies
 
 | Tool | Needed by | Notes |
 |------|-----------|-------|
 | Git for Windows (Git Bash) | Claude Code hooks | Hooks run via Git Bash; `bash.exe` at `C:\Windows\system32` is WSL bash, not Git Bash |
-| `jq` (Windows) | `claude/hooks/shunt.sh` | `winget install jqlang.jq` — Git Bash inherits the Windows PATH. Without it the hook fails open silently (no blocking); `setup.sh` warns about it |
-| Node.js + npm | opencode plugins | `cd ~/.config/opencode && npm install` |
-| `bun` | opencode telemetry only | Optional if the telemetry plugin is removed |
+| `jq` (Windows) | `.claude/hooks/shunt.sh` | `winget install jqlang.jq` — Git Bash inherits the Windows PATH. Without it the hook fails open silently (no blocking) |
 | `jq` + `shellcheck` (Linux, `~/.local/bin`) | dev only: test harness, linting | Optional; harness uses the WSL path fallback |
-| `gitleaks` (Linux, `~/.local/bin`) | `githooks/pre-commit` secrets gate | Without it the gate falls back to a weak pattern scan; `setup.sh` warns about it |
-
-## Fresh-machine setup
-
-Target: Windows host + WSL (NTFS junctions/hardlinks require both). Steps:
-
-1. **Edit the machine-specific paths first** (see below), then `./setup.sh` (creates the links and reports any missing dependency — jq, gitleaks — with the fix hint)
-2. Install the dependencies above (jq via WinGet is the only non-optional one for Claude Code)
-3. opencode deps: `cd ~/.config/opencode && npm install` (node_modules is not versioned)
-4. Telemetry CLI: install bun (`~/.local/bin/bun`) + wrapper `~/.local/bin/octm` pointing to `~/.config/opencode/node_modules/opencode-telemetry/bin/cli.js`
-5. Pricing patch: add `opencode/mimo-v2.5-free` (and variants) to `node_modules/opencode-telemetry/src/pricing.json` (free = 0) — ephemeral patch, redo after `npm update`
-6. Agents/opencode.jsonc reload at the next session; Claude Code re-reads `CLAUDE.md`/`settings.json` (including hooks) at launch
+| `gitleaks` (Linux, `~/.local/bin`) | `githooks/pre-commit` secrets gate | Without it the gate falls back to a weak pattern scan |
 
 ### Machine-specific paths
 
-None hardcoded: `settings.json` uses `~` (Git Bash resolves it to the Windows home), and `setup.sh` auto-detects the Windows username via `cmd.exe`. Override points:
+`settings.json` uses relative paths that resolve from the project root. Override points:
 
-- `CLAUDE_CONFIG_DIR` env var — replaces the auto-detected live `.claude` dir in `setup.sh`
-- `SHUNT_TEST_TMP` env var — replaces the fixture temp dir in `claude/hooks/test-shunt.sh` (dev only)
-- `CMD` env var — non-standard `cmd.exe` location in `setup.sh`
+- `SHUNT_TEST_TMP` env var — replaces the fixture temp dir in `.claude/hooks/test-shunt.sh` (dev only)
 
 Everything else (agents, rules, hook logic, thresholds) is machine-agnostic.
 
 ## Cross-tool sync notes
 
-- `AGENTS.md` (root) is the canonical copy of the workflow rules; `opencode/AGENTS.md` and `claude/AGENTS.md` are plain in-repo copies kept identical by the `agents-sync` pre-commit hook, and `claude/CLAUDE.md` imports `claude/AGENTS.md` via `@AGENTS.md`. Editing the root copy means mirroring to the other two in the same commit — the hook catches drift at commit time, not at session start.
-- **Shunt parity**: opencode enforces it via the `shunt.ts` plugin, Claude Code via the `shunt.sh` hook (same thresholds, 350 lines / 65536 bytes; tuned on either side with `SHUNT_MIN_LINES` / `SHUNT_MAX_BYTES`). Boundary detail: a file with exactly 350 lines passes on the Claude side (`wc -l`), while shunt.ts counts the trailing newline as a line and blocks it. Claude Code flags subagent calls with a top-level `agent_id`, which replaces the plugin's delegated-session tracking. Test the hook with `bash claude/hooks/test-shunt.sh` (exercises the WSL path fallback; the Git Bash/cygpath branch is exercised in production).
+- `AGENTS.md` (root) is the single canonical copy of the workflow rules. `CLAUDE.md` imports it via `@AGENTS.md`. The pre-commit hook blocks any commit where `CLAUDE.md` is not exactly one line `@AGENTS.md`.
+- **Shunt parity**: opencode enforces it via the `shunt.ts` plugin, Claude Code via the `shunt.sh` hook (same thresholds, 350 lines / 65536 bytes; tuned on either side with `SHUNT_MIN_LINES` / `SHUNT_MAX_BYTES`). Boundary detail: a file with exactly 350 lines passes on the Claude side (`wc -l`), while shunt.ts counts the trailing newline as a line and blocks it. Claude Code flags subagent calls with a top-level `agent_id`, which replaces the plugin's delegated-session tracking. Test the hook with `bash .claude/hooks/test-shunt.sh` (exercises the WSL path fallback; the Git Bash/cygpath branch is exercised in production).
 - Accepted divergences: `hidden`/`temperature` agent fields are opencode only; detailed permissions (Task, bash patterns) opencode only; `git push` ask = permission rule on the Claude Code side, `permission` field on the opencode side.
-- `claude/settings.json` is versioned without secrets (credentials live in `.credentials.json`, never committed).
+- `.claude/settings.json` is versioned without secrets (credentials live in `.claude/settings.local.json`, never committed).
+- `.opencode/settings.local.json` is also machine-local and never committed.

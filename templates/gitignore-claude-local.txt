@@ -1,4 +1,0 @@
-# Append to a new project's .gitignore at init time — local Claude Code /
-# opencode settings are machine-specific and must never be committed.
-.claude/settings.local.json
-.opencode/settings.local.json

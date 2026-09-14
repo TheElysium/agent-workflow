@@ -1,6 +1,0 @@
-{
-  "dependencies": {
-    "@opencode-ai/plugin": "1.18.23",
-    "opencode-telemetry": "^0.1.19"
-  }
-}

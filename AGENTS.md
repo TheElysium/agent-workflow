@@ -77,7 +77,7 @@ format: cargo fmt --check        # optional
 
 - `gate-keeper` reads it verbatim, runs each key, and reports a structured pass/fail per command (never interprets results).
 - Accepted gaps are recorded in `.gates.yml` itself, as a dated comment on the affected key (`# gitleaks not installed — gap accepted 2026-09-14`). A RED on a non-skippable step is surfaced and decided the first time it appears; a workaround repeated across two slices is fixed or recorded as an accepted gap — never carried as a habit.
-- Local enforcement is the default: gates run before a task is done and before commit — no CI needed. CI is optional, only for projects whose CI you control (copy `templates/ci-gates.yml` from agent-workflow as `.github/workflows/ci.yml`, keep it in sync with `.gates.yml`).
+- Local enforcement is the default: gates run before a task is done and before commit — no CI needed. CI mirroring `.gates.yml` as `.github/workflows/ci.yml` is optional, only for projects whose CI you control.
 - Dispatch `gate-keeper` as its own explicit step after every `implementer` run, even for a slice that looks trivial — never let the `reviewer` or the orchestrator absorb the gate run informally.
 - UI/visual work that no automated gate can catch → an explicit manual-QA todo item (e.g. "run the app, click through X"), never implicit. An open manual-QA item on a surface blocks starting the next slice that builds on that same surface.
 
@@ -113,7 +113,7 @@ Flow for a substantial task: spec → decompose → explore (parallel) → imple
 
 ## Project init hygiene
 
-- At the start of any new project (before the first commit), add `templates/gitignore-claude-local.txt` from agent-workflow to the project's `.gitignore` — `.claude/settings.local.json` / `.opencode/settings.local.json` are machine-local and must never be committed.
+- At the start of any new project (before the first commit), add to the project's `.gitignore`: `.claude/settings.local.json`, `.opencode/settings.local.json` — these are machine-local and must never be committed.
 
 ## Writing rules
 

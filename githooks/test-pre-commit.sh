@@ -136,23 +136,52 @@ else
   skip "case 11 (shellcheck not installed — hook WARN-skips by design)"
 fi
 
-# --- 13. the three AGENTS.md copies in sync pass ---------------------------
+# --- 13. CLAUDE.md importing root AGENTS.md passes -------------------------
 mkrepo
-mkdir -p "$R/claude" "$R/opencode"
-for p in AGENTS.md claude/AGENTS.md opencode/AGENTS.md; do
-  printf 'same workflow text\n' > "$R/$p"
-done
-git -C "$R" add AGENTS.md claude/AGENTS.md opencode/AGENTS.md
-expect "AGENTS.md copies in sync pass" 0
+printf '@AGENTS.md\n' > "$R/CLAUDE.md"
+printf 'workflow text\n' > "$R/AGENTS.md"
+git -C "$R" add CLAUDE.md AGENTS.md
+expect "CLAUDE.md == @AGENTS.md passes" 0
 
-# --- 14. a diverged AGENTS.md copy blocks ----------------------------------
+# --- 14. CLAUDE.md with inline content or other import blocks --------------
 mkrepo
-mkdir -p "$R/claude" "$R/opencode"
-printf 'same workflow text\n' > "$R/AGENTS.md"
-printf 'same workflow text\n' > "$R/opencode/AGENTS.md"
-printf 'drifted workflow text\n' > "$R/claude/AGENTS.md"
-git -C "$R" add AGENTS.md claude/AGENTS.md opencode/AGENTS.md
-expect "diverged AGENTS.md copy blocks" 1
+printf '# inline workflow\n' > "$R/CLAUDE.md"
+git -C "$R" add CLAUDE.md
+expect "CLAUDE.md with inline content blocks" 1
+
+mkrepo
+printf '@OTHER.md\n' > "$R/CLAUDE.md"
+git -C "$R" add CLAUDE.md
+expect "CLAUDE.md pointing to @OTHER.md blocks" 1
+
+# --- 15. CLAUDE.md with @AGENTS.md followed by a blank line blocks ----------
+mkrepo
+printf '@AGENTS.md\n\n' > "$R/CLAUDE.md"
+printf 'workflow text\n' > "$R/AGENTS.md"
+git -C "$R" add CLAUDE.md AGENTS.md
+expect "CLAUDE.md @AGENTS.md with extra blank line blocks" 1
+
+# --- 16. staged deletion of CLAUDE.md blocks --------------------------------
+mkrepo
+printf '@AGENTS.md\n' > "$R/CLAUDE.md"
+printf 'workflow text\n' > "$R/AGENTS.md"
+git -C "$R" add CLAUDE.md AGENTS.md
+git -C "$R" commit -qm baseline
+git -C "$R" rm -q CLAUDE.md
+expect "staged deletion of CLAUDE.md blocks" 1
+
+# --- 17. CLAUDE.md without trailing newline passes --------------------------
+mkrepo
+printf '@AGENTS.md' > "$R/CLAUDE.md"
+printf 'workflow text\n' > "$R/AGENTS.md"
+git -C "$R" add CLAUDE.md AGENTS.md
+expect "CLAUDE.md @AGENTS.md without trailing newline passes" 0
+
+# --- 18. non-empty junk that strips to the same string still blocks ---------
+mkrepo
+printf '@AGENTS.md\n\nx' > "$R/CLAUDE.md"
+git -C "$R" add CLAUDE.md
+expect "CLAUDE.md with junk after Newline blocks" 1
 
 echo
 echo "results: $PASS passed, $FAIL failed"

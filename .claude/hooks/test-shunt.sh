@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Test harness for the shunt PreToolUse hook (claude/hooks/shunt.sh).
+# Test harness for the shunt PreToolUse hook (.claude/hooks/shunt.sh).
 # Mirrors the behavior contract of the opencode shunt.ts plugin.
 #
 # Usage:  bash test-shunt.sh

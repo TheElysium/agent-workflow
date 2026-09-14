@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Pre-commit gate for agent-workflow itself.
-# Wired via: git config core.hooksPath githooks  (done by setup.sh)
+# Wired via: git config core.hooksPath githooks
 #
 # All checks read the STAGED content (git show :path), never the working tree.
 # Absent tools are skipped with a WARN — they never cause false failures.
@@ -96,33 +96,21 @@ if [ -n "$json_files" ]; then
   fi
 fi
 
-# --- 5. the three AGENTS.md copies stay identical --------------------------
-# AGENTS.md, claude/AGENTS.md and opencode/AGENTS.md must carry the same
-# workflow text. They were hardlinked once, but git does not preserve
-# hardlinks: a checkout, a pull, or an edit through one path silently splits
-# them into independent files. Compare the STAGED blobs so the drift is
-# caught at commit time instead of months later.
-agents_copies="AGENTS.md claude/AGENTS.md opencode/AGENTS.md"
-have_all=1
-for f in $agents_copies; do
-  git cat-file -e ":$f" 2>/dev/null || have_all=0
-done
-if [ "$have_all" = 1 ]; then
-  ref_hash=""
-  drift=""
-  for f in $agents_copies; do
-    h=$(staged_blob "$f" | git hash-object --stdin)
-    if [ -z "$ref_hash" ]; then
-      ref_hash="$h"
-    elif [ "$h" != "$ref_hash" ]; then
-      drift="$drift $f"
-    fi
-  done
-  if [ -n "$drift" ]; then
-    section_fail "AGENTS.md copies diverged from AGENTS.md:$drift — propagate the edit to all three"
-  else
+# --- 5. CLAUDE.md imports root AGENTS.md -----------------------------------
+# The project kit keeps one canonical AGENTS.md at the root. CLAUDE.md must
+# be exactly `@AGENTS.md`, with no extra lines (a missing trailing newline
+# is fine). Any inline content, import of another file, or deletion blocks
+# commit.
+if git cat-file -e ":CLAUDE.md" 2>/dev/null; then
+  claude_md=$(staged_blob "CLAUDE.md")
+  claude_lines=$(staged_blob "CLAUDE.md" | wc -l)
+  if [ "$claude_md" = "@AGENTS.md" ] && [ "$claude_lines" -le 1 ]; then
     say "agents-sync: ok"
+  else
+    section_fail "CLAUDE.md must be exactly one line: @AGENTS.md"
   fi
+elif git diff --cached --name-only --diff-filter=D | grep -qx "CLAUDE.md"; then
+  section_fail "CLAUDE.md cannot be deleted"
 fi
 
 [ "$fail" = 0 ] || { say "commit blocked — fix the failures above"; exit 1; }

@@ -27,6 +27,6 @@ jobs:
 
       # --- keep in sync with .gates.yml ----------------------------------
       - name: lint
-        run: shellcheck githooks/pre-commit githooks/test-pre-commit.sh setup.sh
+        run: shellcheck githooks/pre-commit githooks/test-pre-commit.sh .claude/hooks/shunt.sh .claude/hooks/test-shunt.sh .claude/statusline-command.sh
       - name: test
         run: bash githooks/test-pre-commit.sh
