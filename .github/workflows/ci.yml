@@ -1,0 +1,32 @@
+# CI gates for agent-workflow itself.
+# Runs the same commands as .gates.yml so local gates and CI
+# can never drift apart.
+
+name: gates
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0            # gitleaks needs history
+
+      # --- toolchain (shell stack) ---------------------------------------
+      - name: Install shellcheck
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+
+      - name: gitleaks (secrets)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # --- keep in sync with .gates.yml ----------------------------------
+      - name: lint
+        run: shellcheck githooks/pre-commit githooks/test-pre-commit.sh setup.sh
+      - name: test
+        run: bash githooks/test-pre-commit.sh

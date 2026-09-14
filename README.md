@@ -38,7 +38,7 @@ setup.sh                     creates/verifies the links (all, or opencode/claude
 
 - **Root**: `AGENTS.md` is the single canonical copy of the workflow rules. `opencode/AGENTS.md` and `claude/AGENTS.md` are NTFS hardlinks to it (same inode, three paths) — editing any one of the three edits all of them, in-repo and live.
 - **opencode**: `~/.config/opencode/{AGENTS.md,opencode.jsonc,package*.json,agent,plugins}` are WSL symlinks into this repo.
-- **Claude Code**: `.claude/CLAUDE.md` and `.claude/AGENTS.md` and `.claude/settings.json` are NTFS **hardlinks**, `.claude/agents` is a **junction**, `.claude/hooks/shunt.sh` is a hardlink — visible from both Windows and WSL. `CLAUDE.md` itself is just `@AGENTS.md` (Claude Code's file-import syntax): it has no content of its own, it pulls in the shared file at load time.
+- **Claude Code**: `.claude/CLAUDE.md`, `.claude/AGENTS.md` and `.claude/statusline-command.sh` are NTFS **hardlinks**, `.claude/agents` is a **junction**, `.claude/hooks/shunt.sh` is a hardlink — visible from both Windows and WSL. `CLAUDE.md` itself is just `@AGENTS.md` (Claude Code's file-import syntax): it has no content of its own, it pulls in the shared file at load time. `.claude/settings.json` is **merged, not linked**: `setup.sh` deep-merges the repo's structural keys (hooks, permissions, statusLine, plugins) into the live file — repo wins on conflicts — while Claude Code keeps ownership of session preferences (model, theme, plugin toggles); the repo file therefore carries only structural keys.
 
 Consequence: **the repo IS the live config**. Edit here, the tool sees it immediately (at the next session start for agents).
 
@@ -69,16 +69,17 @@ Details: see `opencode/AGENTS.md` (source of truth).
 | Tool | Needed by | Notes |
 |------|-----------|-------|
 | Git for Windows (Git Bash) | Claude Code hooks | Hooks run via Git Bash; `bash.exe` at `C:\Windows\system32` is WSL bash, not Git Bash |
-| `jq` (Windows) | `claude/hooks/shunt.sh` | `winget install jqlang.jq` — Git Bash inherits the Windows PATH. Without it the hook fails open silently (no blocking) |
+| `jq` (Windows) | `claude/hooks/shunt.sh` | `winget install jqlang.jq` — Git Bash inherits the Windows PATH. Without it the hook fails open silently (no blocking); `setup.sh` warns about it |
 | Node.js + npm | opencode plugins | `cd ~/.config/opencode && npm install` |
 | `bun` | opencode telemetry only | Optional if the telemetry plugin is removed |
 | `jq` + `shellcheck` (Linux, `~/.local/bin`) | dev only: test harness, linting | Optional; harness uses the WSL path fallback |
+| `gitleaks` (Linux, `~/.local/bin`) | `githooks/pre-commit` secrets gate | Without it the gate falls back to a weak pattern scan; `setup.sh` warns about it |
 
 ## Fresh-machine setup
 
 Target: Windows host + WSL (NTFS junctions/hardlinks require both). Steps:
 
-1. **Edit the machine-specific paths first** (see below), then `./setup.sh` (creates the links)
+1. **Edit the machine-specific paths first** (see below), then `./setup.sh` (creates the links and reports any missing dependency — jq, gitleaks — with the fix hint)
 2. Install the dependencies above (jq via WinGet is the only non-optional one for Claude Code)
 3. opencode deps: `cd ~/.config/opencode && npm install` (node_modules is not versioned)
 4. Telemetry CLI: install bun (`~/.local/bin/bun`) + wrapper `~/.local/bin/octm` pointing to `~/.config/opencode/node_modules/opencode-telemetry/bin/cli.js`

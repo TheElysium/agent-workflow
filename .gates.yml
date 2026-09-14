@@ -1,0 +1,4 @@
+stack: shell
+lint: shellcheck githooks/pre-commit githooks/test-pre-commit.sh setup.sh
+test: bash githooks/test-pre-commit.sh
+sast: gitleaks detect --no-banner --redact

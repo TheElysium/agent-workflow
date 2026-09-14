@@ -136,6 +136,24 @@ else
   skip "case 11 (shellcheck not installed — hook WARN-skips by design)"
 fi
 
+# --- 13. the three AGENTS.md copies in sync pass ---------------------------
+mkrepo
+mkdir -p "$R/claude" "$R/opencode"
+for p in AGENTS.md claude/AGENTS.md opencode/AGENTS.md; do
+  printf 'same workflow text\n' > "$R/$p"
+done
+git -C "$R" add AGENTS.md claude/AGENTS.md opencode/AGENTS.md
+expect "AGENTS.md copies in sync pass" 0
+
+# --- 14. a diverged AGENTS.md copy blocks ----------------------------------
+mkrepo
+mkdir -p "$R/claude" "$R/opencode"
+printf 'same workflow text\n' > "$R/AGENTS.md"
+printf 'same workflow text\n' > "$R/opencode/AGENTS.md"
+printf 'drifted workflow text\n' > "$R/claude/AGENTS.md"
+git -C "$R" add AGENTS.md claude/AGENTS.md opencode/AGENTS.md
+expect "diverged AGENTS.md copy blocks" 1
+
 echo
 echo "results: $PASS passed, $FAIL failed"
 [ "$FAIL" = 0 ]

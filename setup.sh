@@ -140,6 +140,41 @@ link_claude_file() { # $1 = live path, $2 = repo file
   fi
 }
 
+# Merge the repo's settings.json INTO the live one (deep merge, repo wins on
+# conflicts) instead of hardlinking: Claude Code rewrites the live file itself
+# (model, theme, plugin toggles), so a hardlink there is a link both sides
+# fight over. The repo file therefore carries only structural keys (hooks,
+# permissions, statusLine, plugins); UI-owned preferences are preserved.
+# Idempotent: a second run with no upstream change reports and does nothing.
+merge_claude_settings() {
+  local live="$CL/settings.json" repo="$REPO/claude/settings.json" merged tmp bak
+  if [ ! -f "$live" ]; then
+    cp "$repo" "$live"
+    echo "claude: settings.json created from repo (no live file existed)"
+    return
+  fi
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "WARN: jq not found - settings.json merge skipped (install jq, re-run ./setup.sh claude)"
+    return
+  fi
+  if ! merged=$(jq -s '.[0] * .[1]' "$live" "$repo" 2>/dev/null); then
+    die "cannot merge settings.json (live file invalid JSON?) - live untouched"
+  fi
+  if [ "$merged" = "$(cat "$live")" ] && [ "$(stat -c %i "$live")" != "$(stat -c %i "$repo")" ]; then
+    echo "claude: settings.json already merged"
+    return
+  fi
+  tmp="$CL/.tmp.settings.json.$$"
+  printf '%s\n' "$merged" > "$tmp" || die "cannot write merged settings.json"
+  bak="$live.bak.$(date +%s)"
+  mv "$live" "$bak" || die "backup failed for settings.json (live untouched)"
+  if ! mv "$tmp" "$live" 2>/dev/null; then
+    mv "$bak" "$live" || die "restore failed for settings.json: backup at $(basename "$bak")"
+    die "swap failed for settings.json (backup restored)"
+  fi
+  echo "claude: settings.json merged (repo entries applied; backup: $(basename "$bak"))"
+}
+
 link_claude() {
   preflight_claude
   # agents/ : junction (appears as a symlink under drvfs)
@@ -172,17 +207,18 @@ link_claude() {
     fi
   fi
   mkdir -p "$CL/hooks"               # live home for the shunt hook
-  for f in CLAUDE.md AGENTS.md settings.json statusline-command.sh; do
+  for f in CLAUDE.md AGENTS.md statusline-command.sh; do
     link_claude_file "$CL/$f" "$REPO/claude/$f"
   done
   link_claude_file "$CL/hooks/shunt.sh" "$REPO/claude/hooks/shunt.sh"
-  echo "claude: $CL/{CLAUDE.md,AGENTS.md,settings.json,statusline-command.sh,agents,hooks/shunt.sh} -> $REPO/claude (junction + hardlinks)"
+  merge_claude_settings
+  echo "claude: $CL/{CLAUDE.md,AGENTS.md,settings.json,statusline-command.sh,agents,hooks/shunt.sh} -> $REPO/claude (junction + hardlinks + settings merge)"
 }
 
 check_claude() {
   local bad=0
   [ -n "$CL" ] || { echo "BROKEN: cannot detect the Windows user dir — set CLAUDE_CONFIG_DIR"; exit 1; }
-  for f in CLAUDE.md AGENTS.md settings.json statusline-command.sh hooks/shunt.sh; do
+  for f in CLAUDE.md AGENTS.md statusline-command.sh hooks/shunt.sh; do
     if [ ! -f "$REPO/claude/$f" ]; then
       echo "BROKEN: repo file missing: claude/$f"; bad=1; continue
     fi
@@ -190,6 +226,12 @@ check_claude() {
       echo "BROKEN: .claude/$f (missing, a symlink, or not hardlinked to the repo anymore)"; bad=1
     fi
   done
+  # settings.json is merged, not hardlinked: it only needs to exist and be valid JSON
+  if [ ! -s "$CL/settings.json" ]; then
+    echo "BROKEN: .claude/settings.json missing or empty - re-run ./setup.sh claude"; bad=1
+  elif command -v jq >/dev/null 2>&1 && ! jq empty "$CL/settings.json" >/dev/null 2>&1; then
+    echo "BROKEN: .claude/settings.json is not valid JSON"; bad=1
+  fi
   if [ "$(readlink "$CL/agents" 2>/dev/null)" != "$REPO/claude/agents" ]; then
     echo "BROKEN: .claude/agents (missing or junction does not target the repo)"; bad=1
   fi
@@ -197,6 +239,35 @@ check_claude() {
     echo "claude: links resolve"
   else
     exit 1
+  fi
+}
+
+# ---------- dependency report (informational, never fatal) ----------
+# Missing tools degrade features silently later on (the shunt hook fails
+# open without jq, the secrets gate falls back to a weak pattern scan
+# without gitleaks); surface that here, at setup time. Never changes the
+# exit code — linking success is judged by the link/check functions only.
+
+deps_report() {
+  if command -v gitleaks >/dev/null 2>&1; then
+    echo "deps: gitleaks ok"
+  else
+    echo "deps: WARN gitleaks not found - pre-commit secrets gate falls back to a weak pattern scan"
+    echo "deps:       fix: install the gitleaks binary in ~/.local/bin (see README dependencies)"
+  fi
+  if command -v jq >/dev/null 2>&1; then
+    echo "deps: jq (WSL) ok"
+  else
+    echo "deps: WARN jq not found (WSL) - pre-commit JSON validation skipped"
+  fi
+  if [ "$TOOL" = all ] || [ "$TOOL" = claude ]; then
+    if [ ! -x "$CMD" ]; then
+      echo "deps: jq (Windows) unknown - cmd.exe not reachable at $CMD"
+    elif "$CMD" /c "where jq" >/dev/null 2>&1; then
+      echo "deps: jq (Windows) ok"
+    else
+      echo "deps: WARN jq not found (Windows) - shunt hook fails open (no blocking); fix: winget install jqlang.jq"
+    fi
   fi
 }
 
@@ -226,3 +297,5 @@ if [ "$ACTION" = check ]; then check_hooks; else install_hooks; fi
 for t in opencode claude; do
   if [ "$TOOL" = all ] || [ "$TOOL" = "$t" ]; then run "$ACTION" "$t"; fi
 done
+
+deps_report

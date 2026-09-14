@@ -62,12 +62,15 @@ fi
 # itself. Covers Latin-1 accented letters (upper and lower) plus oe ligatures;
 # multiplication and division signs are excluded on purpose.
 ACCENT_PAT='[\x{00C0}-\x{00D6}\x{00D8}-\x{00F6}\x{00F8}-\x{00FF}\x{0152}\x{0153}]'
-if printf 'a' | grep -qP 'a' 2>/dev/null; then
+# grep -P refuses a non-UTF-8 locale, and Git Bash starts with an empty one:
+# pin a UTF-8 locale for the PCRE calls rather than skipping the check.
+PCRE_LC=C.UTF-8
+if printf 'a' | LC_ALL="$PCRE_LC" grep -qP 'a' 2>/dev/null; then
   ok=1
   txt_files=$(staged | grep -E '\.(md|sh|json|jsonc|yml|yaml|txt|ts)$' || true)
   if [ -n "$txt_files" ]; then
     for f in $txt_files; do
-      if staged_blob "$f" | grep -qPn "$ACCENT_PAT" 2>/dev/null; then
+      if staged_blob "$f" | LC_ALL="$PCRE_LC" grep -qPn "$ACCENT_PAT" 2>/dev/null; then
         section_fail "accented characters (docs must be plain English) in: $f"; ok=""
       fi
     done
@@ -90,6 +93,35 @@ if [ -n "$json_files" ]; then
     done
   else
     say "WARN: jq not installed — JSON validation skipped"
+  fi
+fi
+
+# --- 5. the three AGENTS.md copies stay identical --------------------------
+# AGENTS.md, claude/AGENTS.md and opencode/AGENTS.md must carry the same
+# workflow text. They were hardlinked once, but git does not preserve
+# hardlinks: a checkout, a pull, or an edit through one path silently splits
+# them into independent files. Compare the STAGED blobs so the drift is
+# caught at commit time instead of months later.
+agents_copies="AGENTS.md claude/AGENTS.md opencode/AGENTS.md"
+have_all=1
+for f in $agents_copies; do
+  git cat-file -e ":$f" 2>/dev/null || have_all=0
+done
+if [ "$have_all" = 1 ]; then
+  ref_hash=""
+  drift=""
+  for f in $agents_copies; do
+    h=$(staged_blob "$f" | git hash-object --stdin)
+    if [ -z "$ref_hash" ]; then
+      ref_hash="$h"
+    elif [ "$h" != "$ref_hash" ]; then
+      drift="$drift $f"
+    fi
+  done
+  if [ -n "$drift" ]; then
+    section_fail "AGENTS.md copies diverged from AGENTS.md:$drift — propagate the edit to all three"
+  else
+    say "agents-sync: ok"
   fi
 fi
 
