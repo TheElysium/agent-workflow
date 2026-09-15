@@ -1,6 +1,7 @@
 import type { Plugin } from "@opencode-ai/plugin"
 import * as path from "node:path"
-import { statSync } from "node:fs"
+import { mkdirSync, statSync } from "node:fs"
+import { appendFile as appendFileAsync } from "node:fs/promises"
 
 // Session IDs of subagent runs (child sessions) — their reads always pass.
 const DELEGATED_MAX = 4096
@@ -62,7 +63,45 @@ function redirectMsg(p: string, hit: { bytes: number; lines: number | null }, th
   ].join("\n")
 }
 
-export const ShuntPlugin: Plugin = async ({ directory }) => {
+async function logShuntBlock(
+  sinkPath: string,
+  fields: {
+    sessionID: string
+    tool: "read" | "bash"
+    p: string
+    hit: { bytes: number; lines: number | null }
+    threshold: number
+    command?: string
+  },
+): Promise<void> {
+  try {
+    const rec: Record<string, unknown> = {
+      ts: new Date().toISOString(),
+      harness: "opencode",
+      session: fields.sessionID,
+      tool: fields.tool,
+      path: fields.p,
+      reason: fields.hit.lines != null ? "lines" : "bytes",
+      bytes: fields.hit.bytes,
+      lines: fields.hit.lines,
+      threshold_bytes: maxBytes(),
+      threshold_lines: fields.threshold,
+    }
+    if (fields.tool === "bash") rec.command = fields.command
+    await appendFileAsync(sinkPath, JSON.stringify(rec) + "\n")
+  } catch {
+    // instrumentation must never block the redirect behavior
+  }
+}
+
+export const ShuntPlugin: Plugin = async ({ directory, worktree }) => {
+  const sinkDir = path.join(worktree ?? directory ?? ".", ".usage")
+  try {
+    mkdirSync(sinkDir, { recursive: true })
+  } catch {
+    // instrumentation must never break the harness init
+  }
+  const sinkPath = path.join(sinkDir, "shunt.jsonl")
   return {
     event: async ({ event }) => {
       const info = (event as { properties?: { info?: { id?: string; parentID?: string } } })
@@ -85,7 +124,10 @@ export const ShuntPlugin: Plugin = async ({ directory }) => {
         if (!args?.filePath || isTargeted(args)) return
         const p = path.resolve(directory, args.filePath)
         const hit = await isOversized(p, threshold)
-        if (hit.big) throw new Error(redirectMsg(p, hit, threshold))
+        if (hit.big) {
+          await logShuntBlock(sinkPath, { sessionID: input.sessionID, tool: "read", p, hit, threshold })
+          throw new Error(redirectMsg(p, hit, threshold))
+        }
         return
       }
 
@@ -102,7 +144,10 @@ export const ShuntPlugin: Plugin = async ({ directory }) => {
         for (const f of files) {
           const p = path.resolve(directory, f)
           const hit = await isOversized(p, threshold)
-          if (hit.big) throw new Error(redirectMsg(p, hit, threshold))
+          if (hit.big) {
+            await logShuntBlock(sinkPath, { sessionID: input.sessionID, tool: "bash", p, hit, threshold, command: cmd })
+            throw new Error(redirectMsg(p, hit, threshold))
+          }
         }
         return
       }

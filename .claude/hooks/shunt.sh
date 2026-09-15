@@ -42,6 +42,17 @@ max_bytes() {
 MIN_LINES=$(min_lines)
 MAX_BYTES=$(max_bytes)
 
+# Structured fields (+ the human-readable redirect message) for the last
+# check_file() block decision, consumed by log_shunt_block()/deny() at the
+# call sites. Populated via globals, not a captured return value: capturing
+# check_file's stdout with `$(...)` would fork a subshell and any globals it
+# sets there would not survive back to the caller. Initialized so `set -u`
+# never trips even though check_file() only assigns them on the deny path.
+LAST_REASON=""
+LAST_BYTES=""
+LAST_LINES=""
+LAST_MSG=""
+
 # --- path handling --------------------------------------------------------
 # The Read tool sends absolute Windows paths with backslashes. Convert for
 # the POSIX tools. cygpath exists under Git Bash (Windows); the WSL fallback
@@ -82,6 +93,46 @@ deny() { # $1 = reason text
   exit 0
 }
 
+# Telemetry sink, mirrors .opencode/plugins/shunt.ts's logShuntBlock: one
+# JSONL line per denied call, written BEFORE the deny JSON. Best-effort only
+# — a logging failure must never suppress the deny decision.
+log_shunt_block() { # log_shunt_block <tool: read|bash> <path> [command]
+  local tool="$1" p="$2" cmd="${3-}" line
+  if [ "$tool" = "bash" ]; then
+    line=$(jq -cn \
+      --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      --arg session "$SESSION" \
+      --arg tool "$tool" \
+      --arg path "$p" \
+      --arg reason "$LAST_REASON" \
+      --argjson bytes "$LAST_BYTES" \
+      --argjson lines "${LAST_LINES:-null}" \
+      --argjson threshold_bytes "$MAX_BYTES" \
+      --argjson threshold_lines "$MIN_LINES" \
+      --arg command "$cmd" \
+      '{ts:$ts,harness:"claude",session:$session,tool:$tool,path:$path,reason:$reason,
+        bytes:$bytes,lines:$lines,threshold_bytes:$threshold_bytes,
+        threshold_lines:$threshold_lines,command:$command}' 2>/dev/null)
+  else
+    line=$(jq -cn \
+      --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      --arg session "$SESSION" \
+      --arg tool "$tool" \
+      --arg path "$p" \
+      --arg reason "$LAST_REASON" \
+      --argjson bytes "$LAST_BYTES" \
+      --argjson lines "${LAST_LINES:-null}" \
+      --argjson threshold_bytes "$MAX_BYTES" \
+      --argjson threshold_lines "$MIN_LINES" \
+      '{ts:$ts,harness:"claude",session:$session,tool:$tool,path:$path,reason:$reason,
+        bytes:$bytes,lines:$lines,threshold_bytes:$threshold_bytes,
+        threshold_lines:$threshold_lines}' 2>/dev/null)
+  fi
+  [ -n "$line" ] || return 0
+  mkdir -p .usage 2>/dev/null || true
+  { printf '%s\n' "$line" >> .usage/shunt.jsonl; } 2>/dev/null || true
+}
+
 # Oversized check shared by the Read and Bash paths. Prints the redirect
 # reason and returns 1 when oversized; returns 0 otherwise.
 check_file() { # check_file <path>
@@ -90,13 +141,15 @@ check_file() { # check_file <path>
   up=$(unixpath "$p")
   bytes=$(byte_size "$up")
   if [ "$bytes" -gt "$MAX_BYTES" ]; then
-    redirect_reason "$p" "$((bytes / 1024)) KB (threshold: $(( MAX_BYTES / 1024 )) KB)"
+    LAST_REASON=bytes; LAST_BYTES=$bytes; LAST_LINES=""
+    LAST_MSG=$(redirect_reason "$p" "$((bytes / 1024)) KB (threshold: $(( MAX_BYTES / 1024 )) KB)")
     return 1
   fi
   [ "$bytes" -eq 0 ] && return 0
   lines=$(line_count "$up")
   if [ "$lines" -gt "$MIN_LINES" ]; then
-    redirect_reason "$p" "$lines lines (threshold: $MIN_LINES)"
+    LAST_REASON=lines; LAST_BYTES=$bytes; LAST_LINES=$lines
+    LAST_MSG=$(redirect_reason "$p" "$lines lines (threshold: $MIN_LINES)")
     return 1
   fi
   return 0
@@ -108,9 +161,9 @@ check_file() { # check_file <path>
 # NUL-delimited + mapfile: tab/TSV variants break on empty fields (read
 # collapses IFS-whitespace runs) and NUL never appears in JSON string content.
 mapfile -t -d '' F < <(
-  printf '%s' "$input" | jq -j '[.agent_id // "", .tool_name // "", .tool_input.file_path // "", (.tool_input.offset // "")] | join("\u0000")' 2>/dev/null
+  printf '%s' "$input" | jq -j '[.agent_id // "", .tool_name // "", .tool_input.file_path // "", (.tool_input.offset // ""), (.session_id // "")] | join("\u0000")' 2>/dev/null
 )
-agent=${F[0]-}; tool=${F[1]-}; file=${F[2]-}; offset=${F[3]-}
+agent=${F[0]-}; tool=${F[1]-}; file=${F[2]-}; offset=${F[3]-}; SESSION=${F[4]-}
 
 # Subagent calls are the workers: their reads always pass.
 [ -n "$agent" ] && exit 0
@@ -120,8 +173,9 @@ case "$tool" in
     [ -n "$file" ] || exit 0
     # limit alone can equal the default full-read size — only a real offset is targeted.
     [ -n "$offset" ] && [ "$offset" != "null" ] && exit 0
-    if ! result=$(check_file "$file"); then
-      deny "$result"
+    if ! check_file "$file"; then
+      log_shunt_block read "$file"
+      deny "$LAST_MSG"
     fi
     exit 0
     ;;
@@ -139,8 +193,9 @@ case "$tool" in
     set -f                             # no globbing: expand nothing, check the literal arg like shunt.ts
     for f in $args; do                 # intentional word splitting
       case "$f" in -*) continue;; esac
-      if ! result=$(check_file "$f"); then
-        deny "$result"
+      if ! check_file "$f"; then
+        log_shunt_block bash "$f" "$cmd"
+        deny "$LAST_MSG"
       fi
     done
     exit 0

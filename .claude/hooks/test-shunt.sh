@@ -65,7 +65,9 @@ expect() { # expect <desc> <want: pass|deny> <input-json> [ENVVAR value]...
   local desc="$1" want="$2" in="$3"; shift 3
   local env_extra=() out verdict
   while [ $# -ge 2 ]; do env_extra+=("$1=$2"); shift 2; done
-  out=$(printf '%s' "$in" | env "${env_extra[@]}" bash "$HOOK" 2>/dev/null)
+  # cd into TDIR: any deny now also writes .usage/shunt.jsonl (telemetry),
+  # relative to cwd — keep it inside the isolated fixture dir, never the repo.
+  out=$(cd "$TDIR" && printf '%s' "$in" | env "${env_extra[@]}" bash "$HOOK" 2>/dev/null)
   if jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null 2>&1 <<< "$out"; then
     verdict=deny
   else
@@ -167,12 +169,87 @@ else
 fi
 
 # The deny reason is the point of the shunt: it must redirect to delegation.
-REASON_OUT=$(printf '%s' "$(mkinput Read "{\"file_path\":\"$TDIR/big.txt\"}")" | bash "$HOOK" 2>/dev/null)
+REASON_OUT=$(cd "$TDIR" && printf '%s' "$(mkinput Read "{\"file_path\":\"$TDIR/big.txt\"}")" | bash "$HOOK" 2>/dev/null)
 if grep -q "BLOCKED by shunt" <<< "$REASON_OUT" && grep -q "bulk-reader" <<< "$REASON_OUT"; then
   PASS=$((PASS + 1))
 else
   FAIL=$((FAIL + 1)); echo "FAIL: deny reason lacks shunt guidance  [out: ${REASON_OUT:0:140}]"
 fi
+
+# --- shunt.jsonl telemetry --------------------------------------------------
+# Every denied call appends one JSONL line to .usage/shunt.jsonl (relative to
+# cwd, so isolated to $TDIR here — never the repo's real sink).
+
+SINK="$TDIR/.usage/shunt.jsonl"
+
+# Line-threshold deny: reason "lines", lines count, no "command" key (Read).
+rm -f "$SINK"
+(cd "$TDIR" && printf '%s' "$(mkinput Read "{\"file_path\":\"$TDIR/big.txt\"}")" | bash "$HOOK" >/dev/null 2>&1)
+if [ -f "$SINK" ]; then
+  LAST=$(tail -n1 "$SINK")
+  if jq -e --arg p "$TDIR/big.txt" '
+      .harness == "claude" and .tool == "read" and .reason == "lines" and
+      .lines == 400 and .path == $p and (has("command") | not)
+    ' >/dev/null 2>&1 <<< "$LAST"; then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1)); echo "FAIL: shunt.jsonl Read/lines record malformed  [line: ${LAST:0:200}]"
+  fi
+else
+  FAIL=$((FAIL + 1)); echo "FAIL: shunt.jsonl not created after denied Read"
+fi
+
+# Byte-threshold deny: reason "bytes".
+rm -f "$SINK"
+(cd "$TDIR" && printf '%s' "$(mkinput Read "{\"file_path\":\"$TDIR/fat.json\"}")" | bash "$HOOK" >/dev/null 2>&1)
+LAST=$(tail -n1 "$SINK" 2>/dev/null)
+if jq -e '.reason == "bytes"' >/dev/null 2>&1 <<< "$LAST"; then
+  PASS=$((PASS + 1))
+else
+  FAIL=$((FAIL + 1)); echo "FAIL: shunt.jsonl bytes reason missing  [line: ${LAST:0:200}]"
+fi
+
+# Bash cat deny: tool "bash" and "command" carries the raw invocation.
+rm -f "$SINK"
+(cd "$TDIR" && printf '%s' "$(mkinput Bash "{\"command\":\"cat $TDIR/big.txt\"}")" | bash "$HOOK" >/dev/null 2>&1)
+LAST=$(tail -n1 "$SINK" 2>/dev/null)
+if jq -e --arg c "cat $TDIR/big.txt" '.tool == "bash" and (.command // "" | contains($c))' >/dev/null 2>&1 <<< "$LAST"; then
+  PASS=$((PASS + 1))
+else
+  FAIL=$((FAIL + 1)); echo "FAIL: shunt.jsonl bash record missing/incorrect command  [line: ${LAST:0:200}]"
+fi
+
+# A passing call (small file) must not append anything.
+rm -f "$SINK"
+(cd "$TDIR" && printf '%s' "$(mkinput Read "{\"file_path\":\"$TDIR/small.txt\"}")" | bash "$HOOK" >/dev/null 2>&1)
+if [ -f "$SINK" ]; then
+  FAIL=$((FAIL + 1)); echo "FAIL: shunt.jsonl created on a passing Read"
+else
+  PASS=$((PASS + 1))
+fi
+
+# A subagent call (top-level agent_id) must not append, even on a big file.
+rm -f "$SINK"
+(cd "$TDIR" && printf '%s' "$(mkinput Read "{\"file_path\":\"$TDIR/big.txt\"}" '{"agent_id":"ag1"}')" | bash "$HOOK" >/dev/null 2>&1)
+if [ -f "$SINK" ]; then
+  FAIL=$((FAIL + 1)); echo "FAIL: shunt.jsonl created on a subagent call"
+else
+  PASS=$((PASS + 1))
+fi
+
+# Unwritable sink (best-effort logging): a regular file named ".usage" makes
+# `mkdir -p .usage` and the telemetry append both fail (ENOTDIR). The deny
+# decision must still be emitted correctly, with no stray error on stderr.
+rm -rf "$TDIR/.usage"
+: > "$TDIR/.usage"
+ERR_OUT=$(cd "$TDIR" && printf '%s' "$(mkinput Read "{\"file_path\":\"$TDIR/big.txt\"}")" | bash "$HOOK" 2>&1 1>/dev/null)
+OUT=$(cd "$TDIR" && printf '%s' "$(mkinput Read "{\"file_path\":\"$TDIR/big.txt\"}")" | bash "$HOOK" 2>/dev/null)
+if [ -z "$ERR_OUT" ] && grep -q "BLOCKED by shunt" <<< "$OUT"; then
+  PASS=$((PASS + 1))
+else
+  FAIL=$((FAIL + 1)); echo "FAIL: unwritable .usage sink leaks stderr or breaks deny  [stderr: ${ERR_OUT:0:140}] [out: ${OUT:0:140}]"
+fi
+rm -f "$TDIR/.usage"
 
 echo
 echo "results: $PASS passed, $FAIL failed"
