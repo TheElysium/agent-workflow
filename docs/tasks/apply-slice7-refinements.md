@@ -1,6 +1,6 @@
 # Apply slice-7 refinements
 
-Status: Lot A in progress. Source: opencycling `docs/tasks/slice-7-workflow-report.md` §6 (verified against raw TSVs on 2026-09-16). 3/16 refinements were already applied (anchors chain, review-checklist, gitleaks); 13 remain.
+Status: batches A (e3e9a17), B (76ed44e), C (this commit) done. Next: task closure — compress this file, workflow report. Source: opencycling `docs/tasks/slice-7-workflow-report.md` §6 (verified against raw TSVs on 2026-09-16). 3/16 refinements were already applied (anchors chain, review-checklist, gitleaks); 13 remain.
 
 ## Spec
 
@@ -24,3 +24,15 @@ Out of scope: opencycling repo, push, new agents, sast/CI changes.
 ## Subagent log
 
 (append one line per subagent completion)
+
+Batches A/B: not logged (prior session ended before logging).
+
+- reviewer (C) | 46576 | 8 | 205s | 0 | 1 | 0 | APPROVE (minor: summ() branches beyond Bash/Read untested; nits: no -h/unknown-option test, SC2016 disables)
+- gate-keeper (C, Git Bash) | 21451 | 22 | 571s | 0 | 0 | 1 | RED — env: shellcheck/bun/gitleaks absent in Git Bash, NTFS rejects `"` filenames
+- gate-keeper (C, WSL) | 13576 | 5 | 85s | 0 | 0 | 0 | GREEN lint/test/sast
+
+## Notes
+
+- Gates run in WSL (`wsl.exe -e bash -lc 'cd /mnt/c/... && <cmd>'`), never Git Bash — tools live in WSL `~/.local/bin`.
+- Batch C deviation: fixtures synthetic (spec's source subagent transcript no longer on disk); script smoke-run on the real 3.5 MB opencycling transcript.
+- Follow-ups: tests for summ() tool branches, `-h`, unknown option.
