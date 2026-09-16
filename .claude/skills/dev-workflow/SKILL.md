@@ -7,7 +7,7 @@ Multi-phase workflow. The main session is the default orchestrator.
 
 ## Phase 1 — Understand & Spec
 
-- `git status` before any edit: uncommitted work on the tree belongs to a prior task — land it as its own commit or ask the user, never mix it into the new task branch. An open `docs/tasks/<slug>.md` whose status header doesn't match the tree is a red flag (last session ended without its commit).
+- `git status` before any edit. Uncommitted work belongs to a prior task: land it or ask the user first. A `docs/tasks/<slug>.md` status header that doesn't match the tree = prior session ended without its commit.
 - Locate the spec: user message, `docs/`, `*.md` files, or issues.
 - Extract: requirements, acceptance criteria, edge cases, explicit out-of-scope.
 - Non-trivial spec (T1 with new behavior, T2, architectural impact) → dispatch `spec-critic` on the extracted spec before planning. `STRUCTURED` → proceed. `NEEDS_CLARIFICATION` → interview the user with its question list.
@@ -95,7 +95,7 @@ format: cargo fmt --check        # optional
 ## Multi-agent rules
 
 - Subagents start with a fresh context: every delegation prompt must be self-contained (extracted spec, exact task, `file:line` anchors, stack conventions, acceptance criteria). Never rely on session context.
-- Include known environment constraints in every delegation prompt (CI toolchain gaps, OS quirks, host-dependent test hazards). Constraints knowable up front are cheaper than a review round.
+- Include known environment constraints in every delegation prompt (CI toolchain gaps, OS quirks, host-dependent test hazards).
 - Subagent outputs: structured bullets only, no file dumps.
 - Launch independent delegations in the same message to parallelize. `gate-keeper` and `reviewer` are both read-only on the same tree — dispatch them in parallel after implementation.
 - Reviewer delegation: every reviewer prompt includes the output of `scripts/review-checklist.sh` (deterministic, per-file checklist) plus the spec/acceptance criteria; the reviewer must cover every listed file. Checklist > ~10 files → split into parallel `reviewer` runs, each with its own sub-checklist; aggregate verdicts (a single REQUEST_CHANGES blocks). LLM review never enters `.gates.yml` — gates stay reproducible.
