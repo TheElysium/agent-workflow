@@ -1,38 +1,48 @@
 # Apply slice-7 refinements
 
-Status: batches A (e3e9a17), B (76ed44e), C (this commit) done. Next: task closure — compress this file, workflow report. Source: opencycling `docs/tasks/slice-7-workflow-report.md` §6 (verified against raw TSVs on 2026-09-16). 3/16 refinements were already applied (anchors chain, review-checklist, gitleaks); 13 remain.
+Status: archived 2026-09-16. Commits: A e3e9a17, B 76ed44e, C 411ffa2 (branch `chore/apply-slice7-refinements`, not pushed). Source: opencycling `docs/tasks/slice-7-workflow-report.md` §6.
 
-## Spec
+## Outcome
 
-Problem: without the refinements, slice-7 frictions repeat on the next UI slice (throwaway design round, missed re-gate, silent gate deviation, unbounded shunt bypasses).
+- A — dev-workflow SKILL.md + agents: visual target, UI design checkpoint before review, design-iteration routing by size, re-gate after review fixes, gate-keeper never-narrow, reviewer no gate re-runs, delta-scoped re-review, orchestrator Edit/Write only, batched log writes, no blocking TaskOutput, report sections (orchestrator cost, per-thread tool usage).
+- B — shunt (sh + ts): Read passes only with offset AND limit; bounded single reads (`sed -n 'A,Bp'`, `head -n/-c N`, `tail -n N`) pass before the size check; `$`-ranges, `tail -n +N`, plain head/tail denied; compound exemption + uncovered verbs (python/jq/git show) documented as contract.
+- C — `scripts/session-tools.sh <session.jsonl> [--thread] [--cut] [--subagents dir] [--summary]`: TSV log per tool call with ERROR/FLAG, per-thread tool counts + token totals; gated in `.gates.yml`.
 
-Solution: 3 sequential batches on branch `chore/apply-slice7-refinements`.
+## Decisions
 
-## Decisions (fixed after spec-critic round — 15 questions resolved)
+- `--cut` filters assistant records (calls + usage) at ingestion, second precision; user records kept so tool_results resolve.
+- `jq -b` everywhere (native Windows jq emits CRLF).
+- Subagent thread label = `agentType` from `agent-*.meta.json`, else file stem.
+- Fixtures synthetic: the spec's source subagent transcript no longer existed; smoke-run on the real 3.5 MB opencycling transcript instead.
 
-Batch A — doc (SKILL.md, gate-keeper.md, reviewer.md, spec-critic.md): A1 visual target + spec-critic trigger; A2 UI order (reviewer after screenshot iterations; amend parallel rule ~:100; one round per iteration, fix/re-review loop still governs); A3 design-iteration routing by size; A4 re-gate in Phase 5 Git; A5 gate-keeper Bash-only + never-narrow (no variant/subset, e.g. no `| head`, no `--lib`); A6 reviewer no gate re-runs, Read not sed/cat; A7 delta-scoped re-review when prompt certifies resume unavailable + confined fix, reviewer escalates to full if delta touches tested behavior; A8 orchestrator Edit/Write only, shell edits for one-line mechanical changes only; A9 batch each log update into ONE write; A10 no blocking TaskOutput — hand-back arrives as message, end the turn; A11 reports include orchestrator cost + per-thread tool usage sections.
+## Report (batch C session only — A/B sessions unlogged)
 
-Batch B — shunt (shunt.sh + test-shunt.sh + shunt.ts + shunt.test.ts), TDD, tests flipped first:
-- B1 Read passes only with offset AND limit both non-empty (offset=0 counts; limit=0 counts as "0" — noted in comment). Tests flipped: test-shunt.sh:92 pass→deny.
-- B2 single-command bounded reads pass before size check: `sed -n 'A,Bp'` numeric-only (quotes/spaces optional, multiple file args, per-file window), `head -n N`, `head -c N`, `tail -n N`. Deny: `$`-anchored ranges (`sed -n '100,$p'`), `tail -n +N`, sed without `-n`, plain head/tail (implicit bound). `$` removed from the compound-exemption char class so `$`-ranges no longer slip through. Bounded pass skips byte/line size check (fat-single-line caveat documented).
-- B3 compound exemption + uncovered verbs (python/jq/git show) documented as contract in hook comments and tests. Accepted: piped `sed -n 400,562p | grep` still passes (exemption stays).
+Subagents:
 
-Batch C — `scripts/session-tools.sh` + `test-session-tools.sh`, registered in .gates.yml (lint + test). CLI: `session-tools.sh <session.jsonl> [--thread label] [--cut ts] [--subagents dir]`; JSONL slurped to array before jq; outputs per-thread tool counts, TSV command log, ERROR/FLAG statuses (regex from opencycling jq), per-subagent token usage from `subagents/*.jsonl`. Fixtures: sanitized real lines from `~/.claude/projects/C--Users-lukas-Documents-Projets-opencycling/4b6f560a-db03-4293-85e7-58e3f474ffce{,.jsonl,/subagents/agent-a34d390284502049a.jsonl}`.
+- reviewer | 46576 | 8 | 205s | 0 | 1 | 0 | APPROVE (minor/nits deferred)
+- gate-keeper (Git Bash) | 21451 | 22 | 571s | 0 | 0 | 1 | RED — env, tools absent
+- gate-keeper (WSL) | 13576 | 5 | 85s | 0 | 0 | 0 | GREEN
 
-Out of scope: opencycling repo, push, new agents, sast/CI changes.
+Orchestrator cost (`session-tools.sh --summary`): 60 turns, 49.8k output, 3.28M cache reads, 3.48M billed volume.
 
-## Subagent log
+Per-thread tool usage:
 
-(append one line per subagent completion)
+| thread | calls | errors | flags | tools |
+|---|---|---|---|---|
+| main | 28 | 0 | 10 | Bash 15, Edit 5, Read 3, Agent 3, Write 1, Skill 1 |
+| gate-keeper (×2) | 27 | 4 | 11 | Bash 22, Read 3 |
+| reviewer | 8 | 0 | 6 | Read 4, Grep 2, Bash 1 |
 
-Batches A/B: not logged (prior session ended before logging).
+Blocks: 1 pre-commit (Git Bash lacks shellcheck/gitleaks) → re-committed from WSL, no bypass.
 
-- reviewer (C) | 46576 | 8 | 205s | 0 | 1 | 0 | APPROVE (minor: summ() branches beyond Bash/Read untested; nits: no -h/unknown-option test, SC2016 disables)
-- gate-keeper (C, Git Bash) | 21451 | 22 | 571s | 0 | 0 | 1 | RED — env: shellcheck/bun/gitleaks absent in Git Bash, NTFS rejects `"` filenames
-- gate-keeper (C, WSL) | 13576 | 5 | 85s | 0 | 0 | 0 | GREEN lint/test/sast
+## Lessons
 
-## Notes
+- Gates and commits on this host run in WSL; Git Bash lacks shellcheck/bun/gitleaks. First gate-keeper run without that constraint cost 571s for a RED.
+- gate-keeper (Git Bash run) split the `test` chain and appended `| tail -50` despite the never-narrow rule.
+- FLAG regex is noise-dominated: 22/27 flags are Read/Grep content or passing test summaries (`FAIL=0`, "shunt" in file text).
 
-- Gates run in WSL (`wsl.exe -e bash -lc 'cd /mnt/c/... && <cmd>'`), never Git Bash — tools live in WSL `~/.local/bin`.
-- Batch C deviation: fixtures synthetic (spec's source subagent transcript no longer on disk); script smoke-run on the real 3.5 MB opencycling transcript.
-- Follow-ups: tests for summ() tool branches, `-h`, unknown option.
+## Follow-ups
+
+- Tests for `summ()` tool branches beyond Bash/Read, `-h`, unknown option.
+- FLAG only on Bash/PowerShell results, or tighten regex (`FAIL=0` false positive).
+- WSL constraint recorded where gate-keeper reads it (`.gates.yml` header).
