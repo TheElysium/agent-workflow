@@ -89,8 +89,14 @@ expect "Read small file passes" pass \
 expect "Read big file (400 lines) is denied" deny \
   "$(mkinput Read "{\"file_path\":\"$TDIR/big.txt\"}")"
 
-expect "Read big file with offset is targeted" pass \
+expect "Read big file with offset alone is now denied" deny \
   "$(mkinput Read "{\"file_path\":\"$TDIR/big.txt\",\"offset\":10}")"
+
+expect "Read big file with offset and limit is targeted" pass \
+  "$(mkinput Read "{\"file_path\":\"$TDIR/big.txt\",\"offset\":10,\"limit\":20}")"
+
+expect "Read big file with offset=0 and limit is targeted" pass \
+  "$(mkinput Read "{\"file_path\":\"$TDIR/big.txt\",\"offset\":0,\"limit\":20}")"
 
 expect "Read big file with limit only still denied (no offset)" deny \
   "$(mkinput Read "{\"file_path\":\"$TDIR/big.txt\",\"limit\":50}")"
@@ -173,6 +179,90 @@ expect "Bash base64 big file is denied" deny \
 
 expect "Bash strings big file is denied" deny \
   "$(mkinput Bash "{\"command\":\"strings $TDIR/big.txt\"}")"
+
+# Bounded single-command reads skip the size check entirely.
+expect "Bash sed -n 244,260p big file is targeted" pass \
+  "$(mkinput Bash "{\"command\":\"sed -n 244,260p $TDIR/big.txt\"}")"
+
+expect "Bash sed -n quoted 244,260p big file is targeted" pass \
+  "$(mkinput Bash "{\"command\":\"sed -n '244,260p' $TDIR/big.txt\"}")"
+
+expect "Bash head -n 20 big file is targeted" pass \
+  "$(mkinput Bash "{\"command\":\"head -n 20 $TDIR/big.txt\"}")"
+
+expect "Bash head -c 500 big file is targeted" pass \
+  "$(mkinput Bash "{\"command\":\"head -c 500 $TDIR/big.txt\"}")"
+
+expect "Bash tail -n 20 big file is targeted" pass \
+  "$(mkinput Bash "{\"command\":\"tail -n 20 $TDIR/big.txt\"}")"
+
+expect "Bash head -n 200 fat single-line file is targeted" pass \
+  "$(mkinput Bash "{\"command\":\"head -n 200 $TDIR/fat.json\"}")"
+
+# Tricky commands are built with jq to avoid nested quote/escape hell in shell.
+SED_UNBOUNDED=$(jq -nc --arg cmd "sed -n '100,\$p' $TDIR/big.txt" '{command:$cmd}')
+TAIL_PLUS=$(jq -nc --arg cmd "tail -n +100 $TDIR/big.txt" '{command:$cmd}')
+SED_NO_N=$(jq -nc --arg cmd "sed '244,260p' $TDIR/big.txt" '{command:$cmd}')
+SED_COMPOUND=$(jq -nc --arg cmd "sed -n '100,\$p' $TDIR/big.txt; echo ok" '{command:$cmd}')
+PY_READ=$(jq -nc --arg cmd "python3 -c 'print(open(\"x\").read())' $TDIR/big.txt" '{command:$cmd}')
+SED_MISMATCH=$(jq -nc --arg cmd "sed -n '\"244,260p' $TDIR/big.txt" '{command:$cmd}')
+HEAD_N_PLUS=$(jq -nc --arg cmd "head -n +20 $TDIR/big.txt" '{command:$cmd}')
+TAIL_C_PLUS=$(jq -nc --arg cmd "tail -c +100 $TDIR/big.txt" '{command:$cmd}')
+SED_SPACE_RANGE=$(jq -nc --arg cmd "sed -n '244, 260p' $TDIR/big.txt" '{command:$cmd}')
+SED_NE_SCRIPT=$(jq -nc --arg cmd "sed -ne '100p' $TDIR/big.txt" '{command:$cmd}')
+
+# shellcheck disable=SC2016
+expect 'Bash sed -n 100,$p big file is denied' deny \
+  "$(mkinput Bash "$SED_UNBOUNDED")"
+
+expect "Bash tail -n +100 big file is denied" deny \
+  "$(mkinput Bash "$TAIL_PLUS")"
+
+expect "Bash sed without -n big file is denied" deny \
+  "$(mkinput Bash "$SED_NO_N")"
+
+# Compound-command / whitelist contract: pass untouched, never parsed.
+expect "Bash cat big file && echo ok is compound" pass \
+  "$(mkinput Bash "{\"command\":\"cat $TDIR/big.txt && echo ok\"}")"
+
+# shellcheck disable=SC2016
+expect 'Bash sed -n 100,$p; echo ok is compound (accepted gap)' pass \
+  "$(mkinput Bash "$SED_COMPOUND")"
+
+expect "Bash python3 read of big file passes (uncovered verb)" pass \
+  "$(mkinput Bash "$PY_READ")"
+
+# Edge-case pins for bounded-read detectors.
+expect 'Bash sed -n mismatched quotes 244,260p big file is denied' deny \
+  "$(mkinput Bash "$SED_MISMATCH")"
+
+expect "Bash head -n +20 big file is denied" deny \
+  "$(mkinput Bash "$HEAD_N_PLUS")"
+
+expect "Bash tail -c +100 big file is denied" deny \
+  "$(mkinput Bash "$TAIL_C_PLUS")"
+
+expect "Bash sed -n '244, 260p' big file is denied" deny \
+  "$(mkinput Bash "$SED_SPACE_RANGE")"
+
+expect "Bash head -n0 big file is targeted" pass \
+  "$(mkinput Bash "{\"command\":\"head -n0 $TDIR/big.txt\"}")"
+
+expect "Bash head -n 0 big file is targeted" pass \
+  "$(mkinput Bash "{\"command\":\"head -n 0 $TDIR/big.txt\"}")"
+
+expect "Bash sed -n 1p big file is targeted" pass \
+  "$(mkinput Bash "{\"command\":\"sed -n 1p $TDIR/big.txt\"}")"
+
+expect "Bash sed -ne '100p' big file is denied (script not window)" deny \
+  "$(mkinput Bash "$SED_NE_SCRIPT")"
+
+# Multi-line commands and verb-boundary checks pass untouched.
+expect "Bash multi-line cat big file && echo ok passes" pass \
+  "$(mkinput Bash "$(jq -nc --arg c "cat $TDIR/big.txt"$'\n'"echo ok" '{command:$c}')")"
+
+expect "Bash head-file big file passes (verb boundary)" pass \
+  "$(mkinput Bash "{\"command\":\"head-file $TDIR/big.txt\"}")"
 
 expect "Bash grep small file passes" pass \
   "$(mkinput Bash "{\"command\":\"grep line $TDIR/small.txt\"}")"
