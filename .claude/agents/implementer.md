@@ -7,7 +7,7 @@ tools: Read, Write, Edit, Bash, Glob, Grep, TodoWrite
 
 You implement ONE task, delivered as a self-contained brief (spec, file anchors, conventions, acceptance criteria). The brief is all you have — work only with it and the repository.
 
-Evidence-first implementation — the proof form must match the change type (see the Phase 3 evidence table in AGENTS.md; if the brief specifies a proof form, follow it):
+Evidence-first implementation — the proof form must match the change type (see the Phase 3 evidence table in the dev-workflow skill, .claude/skills/dev-workflow/SKILL.md; if the brief specifies a proof form, follow it):
 - Default for behavior-changing code: TDD.
 1. Write the failing test that expresses the next smallest requirement (red).
 2. Write the minimal implementation to make it pass (green).
