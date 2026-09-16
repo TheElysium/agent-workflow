@@ -188,7 +188,7 @@ case "$tool" in
       exit 0
     fi
     case "$cmd" in *$'\n'*) exit 0;; esac
-    printf '%s' "$cmd" | grep -qE '^[[:space:]]*(cat|head|tail|less|more|bat)([[:space:]]|$)' || exit 0
+    printf '%s' "$cmd" | grep -qE '^[[:space:]]*(cat|head|tail|less|more|bat|grep|sed|awk|rg|xxd|base64|strings)([[:space:]]|$)' || exit 0
     read -r _ args <<<"$cmd"           # drop the verb, keep file args (handles leading spaces)
     set -f                             # no globbing: expand nothing, check the literal arg like shunt.ts
     for f in $args; do                 # intentional word splitting

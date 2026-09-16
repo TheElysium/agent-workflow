@@ -153,6 +153,36 @@ fi
 expect "Bash tail big file is denied" deny \
   "$(mkinput Bash "{\"command\":\"tail $TDIR/big.txt\"}")"
 
+expect "Bash grep big file is denied" deny \
+  "$(mkinput Bash "{\"command\":\"grep foo $TDIR/big.txt\"}")"
+
+expect "Bash sed big file is denied" deny \
+  "$(mkinput Bash "{\"command\":\"sed p $TDIR/big.txt\"}")"
+
+expect "Bash awk big file is denied" deny \
+  "$(mkinput Bash "{\"command\":\"awk $TDIR/big.txt\"}")"
+
+expect "Bash rg big file is denied" deny \
+  "$(mkinput Bash "{\"command\":\"rg foo $TDIR/big.txt\"}")"
+
+expect "Bash xxd big file is denied" deny \
+  "$(mkinput Bash "{\"command\":\"xxd $TDIR/big.txt\"}")"
+
+expect "Bash base64 big file is denied" deny \
+  "$(mkinput Bash "{\"command\":\"base64 $TDIR/big.txt\"}")"
+
+expect "Bash strings big file is denied" deny \
+  "$(mkinput Bash "{\"command\":\"strings $TDIR/big.txt\"}")"
+
+expect "Bash grep small file passes" pass \
+  "$(mkinput Bash "{\"command\":\"grep line $TDIR/small.txt\"}")"
+
+expect "Bash sed small file passes" pass \
+  "$(mkinput Bash "{\"command\":\"sed p $TDIR/small.txt\"}")"
+
+expect "Bash grep with flag big file is denied" deny \
+  "$(mkinput Bash "{\"command\":\"grep -c foo $TDIR/big.txt\"}")"
+
 expect "Bash subagent call passes (top-level agent_id)" pass \
   "$(mkinput Bash "{\"command\":\"cat $TDIR/big.txt\"}" '{"agent_id":"ag2"}')"
 

@@ -1,5 +1,5 @@
 # CI gates for agent-workflow itself.
-# Runs the same commands as .gates.yml so local gates and CI
+# Executes .gates.yml verbatim via scripts/run-gates.sh so local gates and CI
 # can never drift apart.
 
 name: gates
@@ -20,13 +20,17 @@ jobs:
       - name: Install shellcheck
         run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
 
-      - name: gitleaks (secrets)
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          curl -sSfL -o /tmp/gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          sudo install -m 755 /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
 
-      # --- keep in sync with .gates.yml ----------------------------------
-      - name: lint
-        run: shellcheck githooks/pre-commit githooks/test-pre-commit.sh .claude/hooks/shunt.sh .claude/hooks/test-shunt.sh .claude/statusline-command.sh
-      - name: test
-        run: bash githooks/test-pre-commit.sh
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+
+      # --- run the canonical gate definitions ----------------------------
+      - name: Run gates
+        run: bash scripts/run-gates.sh
