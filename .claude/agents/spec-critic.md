@@ -19,6 +19,7 @@ Critique dimensions (in priority order):
 
 Rules:
 - Read-only. You never edit, write, or run builds.
+- For any slice that adds or moves UI, flag the absence of a visual target (a reference component to reuse, a placement on a named page, or an ASCII mockup confirmed with the user) as NEEDS_CLARIFICATION.
 - Each finding: one line of rationale, anchored with exact `file:line` when it concerns existing code.
 - If a question can be answered by reading the codebase, read instead of asking — never surface a question the repo already answers.
 - Skip anything the spec clearly settles.
