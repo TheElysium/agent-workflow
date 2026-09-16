@@ -3,7 +3,7 @@
 # Wired via: git config core.hooksPath githooks
 #
 # All checks read the STAGED content (git show :path), never the working tree.
-# Absent tools are skipped with a WARN — they never cause false failures.
+# Absent gate tools are a hard failure, not a warning. SAST (gitleaks) is non-skippable.
 
 set -euo pipefail
 
@@ -28,33 +28,21 @@ if [ -n "$sh_files" ]; then
       fi
     done
   else
-    say "WARN: shellcheck not installed — skipped (PATH=$HOME/.local/bin)"
+    section_fail "shellcheck not installed — install it (e.g. apt install shellcheck, or put it on PATH)"
   fi
 fi
 
-# --- 2. secrets ------------------------------------------------------------
-secrets_fallback() { # best-effort pattern scan of ADDED lines only (matches gitleaks behavior)
-  # Lines tagged with the upstream "gitleaks:allow" marker are exempt —
-  # used by test fixtures with deliberately fake secrets.
-  if git diff --cached -U0 | grep '^+' | grep -v '^+++' | grep -v 'gitleaks:allow' | grep -InE \
-    '(ghp_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|BEGIN [A-Z ]*PRIVATE KEY)' \
-    >/dev/null 2>&1; then
-    section_fail "secret-like pattern in staged diff (install gitleaks for full coverage)"
-  else
-    say "secrets: ok (pattern fallback; install gitleaks for full coverage)"
-  fi
-}
-
+# --- 2. secrets (SAST — non-skippable) -------------------------------------
 if command -v gitleaks >/dev/null 2>&1; then
   rc=0
   gitleaks protect --staged --redact >/dev/null 2>&1 || rc=$?
   case "$rc" in
     0) say "gitleaks: ok" ;;
     1) section_fail "gitleaks found secrets in staged changes" ;;
-    *) say "WARN: gitleaks exited $rc (version quirk?) — falling back to pattern scan"; secrets_fallback ;;
+    *) section_fail "gitleaks exited $rc" ;;
   esac
 else
-  secrets_fallback
+  section_fail "gitleaks not installed — SAST is non-skippable"
 fi
 
 # --- 3. no accented characters in staged text files (English docs rule) ----
@@ -92,7 +80,7 @@ if [ -n "$json_files" ]; then
       fi
     done
   else
-    say "WARN: jq not installed — JSON validation skipped"
+    section_fail "jq not installed — JSON validation is a gate, not optional"
   fi
 fi
 
