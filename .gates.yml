@@ -1,4 +1,10 @@
+# Gate contract:
+#   - Each non-ignored line is `key: single-line command`.
+#   - Multi-line YAML values are NOT supported by the CI runner.
+#   - `stack` is metadata and is not executed.
+#   - This file is executed verbatim by gate-keeper locally and by
+#     scripts/run-gates.sh in CI.
 stack: shell
-lint: shellcheck githooks/pre-commit githooks/test-pre-commit.sh .claude/hooks/shunt.sh .claude/hooks/test-shunt.sh .claude/hooks/session-end.sh .claude/hooks/test-session-end.sh .claude/statusline-command.sh scripts/review-checklist.sh scripts/test-review-checklist.sh scripts/usage-import-claude.sh scripts/test-usage-import-claude.sh scripts/usage-report.sh scripts/test-usage-report.sh scripts/shunt-report.sh scripts/test-shunt-report.sh
-test: bash githooks/test-pre-commit.sh && bash scripts/test-review-checklist.sh && bash scripts/test-usage-import-claude.sh && bash scripts/test-usage-report.sh && bash .claude/hooks/test-shunt.sh && bash scripts/test-shunt-report.sh && bun test scripts/usage-log.test.ts ./.opencode/plugins/shunt.test.ts
+lint: shellcheck githooks/pre-commit githooks/test-pre-commit.sh .claude/hooks/shunt.sh .claude/hooks/test-shunt.sh .claude/hooks/session-end.sh .claude/hooks/test-session-end.sh .claude/statusline-command.sh scripts/review-checklist.sh scripts/test-review-checklist.sh scripts/usage-import-claude.sh scripts/test-usage-import-claude.sh scripts/usage-report.sh scripts/test-usage-report.sh scripts/shunt-report.sh scripts/test-shunt-report.sh scripts/run-gates.sh scripts/test-run-gates.sh
+test: bash githooks/test-pre-commit.sh && bash scripts/test-review-checklist.sh && bash scripts/test-usage-import-claude.sh && bash scripts/test-usage-report.sh && bash .claude/hooks/test-shunt.sh && bash scripts/test-shunt-report.sh && bun test scripts/usage-log.test.ts ./.opencode/plugins/shunt.test.ts && bash scripts/test-run-gates.sh
 sast: gitleaks detect --no-banner --redact
