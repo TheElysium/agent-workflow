@@ -44,5 +44,5 @@ Blocks: 1 pre-commit (Git Bash lacks shellcheck/gitleaks) → re-committed from 
 ## Follow-ups
 
 - Tests for `summ()` tool branches beyond Bash/Read, `-h`, unknown option.
-- FLAG only on Bash/PowerShell results, or tighten regex (`FAIL=0` false positive).
-- gate-keeper.md: exit 127 → FAIL "tool missing" at once, no filesystem hunt; no per-component re-runs of a chain.
+- `.opencode/agent/gate-keeper.md` lags the Claude copy (never-narrow, run-once rules absent).
+- Done post-closure: FLAG limited to Bash/PowerShell + regex ignores `FAIL=0` / `0 failed` / bare `shunt` (27 → 11 flags on the batch C session); gate-keeper.md run-once rule (exit 127 → FAIL at once, no per-component re-runs).

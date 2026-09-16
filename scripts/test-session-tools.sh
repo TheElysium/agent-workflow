@@ -213,6 +213,45 @@ else
   echo "FAIL: missing --cut value names the option  [out: ${OUT:0:200}]"
 fi
 
+# --- 17. FLAG scope + regex precision -----------------------------------------
+# flag_case <desc> <tool> <input-json> <result-text> <want-status>
+flag_case() {
+  local desc="$1" tool="$2" input="$3" text="$4" want="$5"
+  {
+    jq -nc -b --arg n "$tool" --argjson i "$input" \
+      '{type:"assistant",timestamp:"2026-09-16T12:00:00.000Z",message:{role:"assistant",content:[{type:"tool_use",id:"tu_f",name:$n,input:$i}]}}'
+    jq -nc -b --arg t "$text" \
+      '{type:"user",timestamp:"2026-09-16T12:00:01.000Z",message:{role:"user",content:[{type:"tool_result",tool_use_id:"tu_f",is_error:false,content:[{type:"text",text:$t}]}]}}'
+  } > "$R/flag-case.jsonl"
+  run "$R/flag-case.jsonl"
+  local got
+  got="$(printf '%s' "$OUT" | cut -f5)"
+  if [ "$RC" = 0 ] && [ "$got" = "$want" ]; then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: $desc (want status='$want', got '$got', rc=$RC)  [out: ${OUT:0:200}]"
+  fi
+}
+
+# Content tools never FLAG, whatever the text says.
+flag_case "Read content with failure words is not flagged" Read '{"file_path":"a.md"}' "BLOCKED by shunt: Error: FAIL failed" ""
+flag_case "Grep content with failure words is not flagged" Grep '{"pattern":"x"}' "a.sh:3: echo FAIL: Error:" ""
+flag_case "Glob result is not flagged" Glob '{"pattern":"*"}' "failed.log" ""
+# Command tools: passing summaries are not failures.
+flag_case "Bash FAIL=0 summary is not flagged" Bash '{"command":"t"}' "PASS=17 FAIL=0" ""
+flag_case "Bash '0 failed' summary is not flagged" Bash '{"command":"t"}' "results: 32 passed, 0 failed" ""
+flag_case "Bash word shunt alone is not flagged" Bash '{"command":"t"}' "shunt.sh updated" ""
+# Command tools: real failures still flag.
+flag_case "Bash FAIL=2 is flagged" Bash '{"command":"t"}' "PASS=3 FAIL=2" "FLAG"
+flag_case "Bash '10 failed' is flagged" Bash '{"command":"t"}' "results: 5 passed, 10 failed" "FLAG"
+flag_case "Bash 'FAIL:' line is flagged" Bash '{"command":"t"}' "FAIL: case one" "FLAG"
+flag_case "Bash cargo FAILED is flagged" Bash '{"command":"t"}' "test result: FAILED. 1 passed" "FLAG"
+flag_case "Bash 'command failed' is flagged" Bash '{"command":"t"}' "npm ERR! command failed" "FLAG"
+flag_case "Bash BLOCKED is flagged" Bash '{"command":"t"}' "BLOCKED by shunt: file too large" "FLAG"
+flag_case "Bash exit code is flagged" Bash '{"command":"t"}' "Exit code 2" "FLAG"
+flag_case "PowerShell Error: is flagged" PowerShell '{"command":"t"}' "Error: access denied" "FLAG"
+
 # --- summary -----------------------------------------------------------------
 echo "results: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

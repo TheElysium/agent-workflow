@@ -97,7 +97,10 @@ fi
 JQ_DEFS='
 def txt: if type == "string" then . elif type == "array" then (map(select(.type == "text") | .text) | join(" ")) else tostring end;
 def flat: gsub("[\t\n\r]+"; " ");
-def failre: "BLOCKED|shunt|error TS|Error:|FAIL|failed|non-zero|[Ee]xit code [1-9]";
+# FLAG: command output that reports a failure the tool did not mark as is_error.
+# Passing summaries ("FAIL=0", "0 failed") do not match; content tools (Read, Grep...) never FLAG.
+def failre: "BLOCKED|error TS|Error:|FAIL(?!=0(?![0-9]))|(?<![^0-9]0 )(?<!^0 )failed|non-zero|[Ee]xit code [1-9]";
+def flaggable: .name == "Bash" or .name == "PowerShell";
 def calls: [ .[] | select(.type == "assistant") | . as $r | .message.content? | select(type == "array") | .[]
     | select(.type == "tool_use") | {id, ts: $r.timestamp, thread: $r._thread, name, input} ]
   | unique_by([.thread, .id]);
@@ -106,7 +109,7 @@ def results: [ .[] | select(.type == "user") | .message.content? | select(type =
     | {key: .tool_use_id, value: {err: (.is_error // false), text: (.content | txt)}} ] | from_entries;
 def outcome($res): ($res[.id] // {err: false, text: ""});
 def status($res): outcome($res) as $o
-  | if $o.err then "ERROR" elif ($o.text | test(failre)) then "FLAG" else "" end;
+  | if $o.err then "ERROR" elif flaggable and ($o.text | test(failre)) then "FLAG" else "" end;
 '
 
 # shellcheck disable=SC2016
