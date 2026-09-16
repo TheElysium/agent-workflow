@@ -139,3 +139,144 @@ describe("shunt plugin telemetry", () => {
     await expect(callRead(plugin, "ses5", filePath)).rejects.toThrow("BLOCKED by shunt")
   })
 })
+
+describe("shunt plugin bash blocking", () => {
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "shunt-test."))
+  })
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("denied bash grep call appends one line and throws", async () => {
+    const filePath = join(dir, "big-lines.txt")
+    writeFileSync(filePath, "x\n".repeat(400))
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    const command = `grep foo ${filePath}`
+    await expect(callBash(plugin, "ses6", command)).rejects.toThrow("BLOCKED by shunt")
+
+    const rec = JSON.parse(readFileSync(sinkPath(), "utf8").trim())
+    expect(rec.tool).toBe("bash")
+    expect(rec.command).toBe(command)
+    expect(rec.path).toBe(filePath)
+  })
+
+  test("denied bash sed call appends one line and throws", async () => {
+    const filePath = join(dir, "big-lines.txt")
+    writeFileSync(filePath, "x\n".repeat(400))
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    const command = `sed p ${filePath}`
+    await expect(callBash(plugin, "ses7", command)).rejects.toThrow("BLOCKED by shunt")
+
+    const rec = JSON.parse(readFileSync(sinkPath(), "utf8").trim())
+    expect(rec.tool).toBe("bash")
+    expect(rec.command).toBe(command)
+    expect(rec.path).toBe(filePath)
+  })
+
+  test("denied bash awk call appends one line and throws", async () => {
+    const filePath = join(dir, "big-lines.txt")
+    writeFileSync(filePath, "x\n".repeat(400))
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    const command = `awk ${filePath}`
+    await expect(callBash(plugin, "ses8", command)).rejects.toThrow("BLOCKED by shunt")
+
+    const rec = JSON.parse(readFileSync(sinkPath(), "utf8").trim())
+    expect(rec.tool).toBe("bash")
+    expect(rec.command).toBe(command)
+    expect(rec.path).toBe(filePath)
+  })
+
+  test("denied bash rg call appends one line and throws", async () => {
+    const filePath = join(dir, "big-lines.txt")
+    writeFileSync(filePath, "x\n".repeat(400))
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    const command = `rg foo ${filePath}`
+    await expect(callBash(plugin, "ses9", command)).rejects.toThrow("BLOCKED by shunt")
+
+    const rec = JSON.parse(readFileSync(sinkPath(), "utf8").trim())
+    expect(rec.tool).toBe("bash")
+    expect(rec.command).toBe(command)
+    expect(rec.path).toBe(filePath)
+  })
+
+  test("denied bash xxd call appends one line and throws", async () => {
+    const filePath = join(dir, "big-lines.txt")
+    writeFileSync(filePath, "x\n".repeat(400))
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    const command = `xxd ${filePath}`
+    await expect(callBash(plugin, "ses10", command)).rejects.toThrow("BLOCKED by shunt")
+
+    const rec = JSON.parse(readFileSync(sinkPath(), "utf8").trim())
+    expect(rec.tool).toBe("bash")
+    expect(rec.command).toBe(command)
+    expect(rec.path).toBe(filePath)
+  })
+
+  test("denied bash base64 call appends one line and throws", async () => {
+    const filePath = join(dir, "big-lines.txt")
+    writeFileSync(filePath, "x\n".repeat(400))
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    const command = `base64 ${filePath}`
+    await expect(callBash(plugin, "ses11", command)).rejects.toThrow("BLOCKED by shunt")
+
+    const rec = JSON.parse(readFileSync(sinkPath(), "utf8").trim())
+    expect(rec.tool).toBe("bash")
+    expect(rec.command).toBe(command)
+    expect(rec.path).toBe(filePath)
+  })
+
+  test("denied bash strings call appends one line and throws", async () => {
+    const filePath = join(dir, "big-lines.txt")
+    writeFileSync(filePath, "x\n".repeat(400))
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    const command = `strings ${filePath}`
+    await expect(callBash(plugin, "ses12", command)).rejects.toThrow("BLOCKED by shunt")
+
+    const rec = JSON.parse(readFileSync(sinkPath(), "utf8").trim())
+    expect(rec.tool).toBe("bash")
+    expect(rec.command).toBe(command)
+    expect(rec.path).toBe(filePath)
+  })
+
+  test("passing bash grep call on small file writes nothing", async () => {
+    const filePath = join(dir, "small.txt")
+    writeFileSync(filePath, "hello\n")
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    await callBash(plugin, "ses13", `grep hello ${filePath}`)
+
+    expect(existsSync(sinkPath())).toBe(false)
+  })
+
+  test("passing bash sed call on small file writes nothing", async () => {
+    const filePath = join(dir, "small.txt")
+    writeFileSync(filePath, "hello\n")
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    await callBash(plugin, "ses14", `sed p ${filePath}`)
+
+    expect(existsSync(sinkPath())).toBe(false)
+  })
+
+  test("denied bash grep with leading flag on big file is denied", async () => {
+    const filePath = join(dir, "big-lines.txt")
+    writeFileSync(filePath, "x\n".repeat(400))
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    const command = `grep -c foo ${filePath}`
+    await expect(callBash(plugin, "ses15", command)).rejects.toThrow("BLOCKED by shunt")
+
+    const rec = JSON.parse(readFileSync(sinkPath(), "utf8").trim())
+    expect(rec.tool).toBe("bash")
+    expect(rec.command).toBe(command)
+    expect(rec.path).toBe(filePath)
+  })
+})

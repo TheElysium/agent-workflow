@@ -7,7 +7,7 @@ import { appendFile as appendFileAsync } from "node:fs/promises"
 const DELEGATED_MAX = 4096
 const delegated = new Set<string>()
 
-const BLOCKED_BASH = /^(cat|head|tail|less|more|bat)\b/
+const BLOCKED_BASH = /^(cat|head|tail|less|more|bat|grep|sed|awk|rg|xxd|base64|strings)\b/
 
 function minLines(): number {
   const v = Number(process.env.SHUNT_MIN_LINES)
