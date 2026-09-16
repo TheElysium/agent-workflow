@@ -37,12 +37,12 @@ Blocks: 1 pre-commit (Git Bash lacks shellcheck/gitleaks) → re-committed from 
 
 ## Lessons
 
-- Gates and commits on this host run in WSL; Git Bash lacks shellcheck/bun/gitleaks. First gate-keeper run without that constraint cost 571s for a RED.
-- gate-keeper (Git Bash run) split the `test` chain and appended `| tail -50` despite the never-narrow rule.
+- Gate tool prerequisites were undocumented; Git Bash lacked shellcheck/bun/gitleaks. First gate-keeper run cost 571s for a RED — now listed in `.gates.yml` header.
+- gate-keeper (Git Bash run) ran lint/test verbatim first, then spent ~2 min on `find /c` for shellcheck and re-ran the `test` chain per component with `| tail -50` (sast with `| head -50`). Verdict stayed RED, but pipes break the never-narrow letter and cost ~5 min.
 - FLAG regex is noise-dominated: 22/27 flags are Read/Grep content or passing test summaries (`FAIL=0`, "shunt" in file text).
 
 ## Follow-ups
 
 - Tests for `summ()` tool branches beyond Bash/Read, `-h`, unknown option.
 - FLAG only on Bash/PowerShell results, or tighten regex (`FAIL=0` false positive).
-- WSL constraint recorded where gate-keeper reads it (`.gates.yml` header).
+- gate-keeper.md: exit 127 → FAIL "tool missing" at once, no filesystem hunt; no per-component re-runs of a chain.
