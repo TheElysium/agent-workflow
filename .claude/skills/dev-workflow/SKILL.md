@@ -61,7 +61,7 @@ Multi-phase workflow. The main session is the default orchestrator.
   - **Engineering gate** — lint + typecheck + build + tests + SAST, run by `gate-keeper`.
   - **Intent gate** — does the implementation satisfy the user's intent (acceptance criteria, edge cases, no out-of-scope changes)? Carried by the `reviewer` (dimension 1); the delegation prompt must always provide the spec/acceptance criteria.
 - Gate commands come from the project's `.gates.yml` at the repo root (see below). If it is missing, creating it with the user is the first action of the session — before implementation, not at the first gate run. Never run gates from a command list hand-copied into prompts.
-- SAST is non-skippable: at minimum `gitleaks` (secrets) plus the stack's audit tool. A gate-keeper run that skipped SAST is a failed gate.
+- SAST is non-skippable: a secrets scan plus the stack's audit tool. A gate-keeper run that skipped SAST is a failed gate.
 - A task with a failing gate (engineering or intent) is never "done".
 
 ### `.gates.yml` convention
@@ -74,12 +74,12 @@ lint: cargo clippy -- -D warnings
 typecheck: cargo check
 build: cargo build
 test: cargo test
-sast: cargo audit && gitleaks detect
+sast: cargo audit
 format: cargo fmt --check        # optional
 ```
 
 - `gate-keeper` reads it verbatim, runs each key, and reports a structured pass/fail per command (never interprets results).
-- Accepted gaps are recorded in `.gates.yml` itself, as a dated comment on the affected key (`# gitleaks not installed — gap accepted 2026-09-14`). A RED on a non-skippable step is surfaced and decided the first time it appears; a workaround repeated across two slices is fixed or recorded as an accepted gap — never carried as a habit.
+- Accepted gaps are recorded in `.gates.yml` itself, as a dated comment on the affected key (`# cargo audit not installed — gap accepted 2026-09-14`). A RED on a non-skippable step is surfaced and decided the first time it appears; a workaround repeated across two slices is fixed or recorded as an accepted gap — never carried as a habit.
 - Local enforcement is the default: gates run before a task is done and before commit — no CI needed. CI mirroring `.gates.yml` as `.github/workflows/ci.yml` is optional, only for projects whose CI you control.
 - Dispatch `gate-keeper` as its own explicit step after every `implementer` run, even for a slice that looks trivial — never let the `reviewer` or the orchestrator absorb the gate run informally.
 - UI/visual work that no automated gate can catch → an explicit manual-QA todo item (e.g. "run the app, click through X"), never implicit. An open manual-QA item on a surface blocks starting the next slice that builds on that same surface.
