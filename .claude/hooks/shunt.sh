@@ -73,8 +73,6 @@ unixpath() {
 
 # --- size / line checks ---------------------------------------------------
 
-byte_size() { stat -c %s -- "$1" 2>/dev/null || printf '0\n'; }
-
 line_count() { wc -l < "$1" 2>/dev/null || printf '0\n'; }
 
 redirect_reason() { # $1 = path, $2 = why string
@@ -94,64 +92,81 @@ deny() { # $1 = reason text
 }
 
 # Telemetry sink, mirrors .opencode/plugins/shunt.ts's logShuntBlock: one
-# JSONL line per denied call, written BEFORE the deny JSON. Best-effort only
-# — a logging failure must never suppress the deny decision.
-log_shunt_block() { # log_shunt_block <tool: read|bash> <path> [command]
-  local tool="$1" p="$2" cmd="${3-}" line
-  if [ "$tool" = "bash" ]; then
-    line=$(jq -cn \
-      --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-      --arg session "$SESSION" \
-      --arg tool "$tool" \
-      --arg path "$p" \
-      --arg reason "$LAST_REASON" \
-      --argjson bytes "$LAST_BYTES" \
-      --argjson lines "${LAST_LINES:-null}" \
-      --argjson threshold_bytes "$MAX_BYTES" \
-      --argjson threshold_lines "$MIN_LINES" \
-      --arg command "$cmd" \
-      '{ts:$ts,harness:"claude",session:$session,tool:$tool,path:$path,reason:$reason,
-        bytes:$bytes,lines:$lines,threshold_bytes:$threshold_bytes,
-        threshold_lines:$threshold_lines,command:$command}' 2>/dev/null)
-  else
-    line=$(jq -cn \
-      --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-      --arg session "$SESSION" \
-      --arg tool "$tool" \
-      --arg path "$p" \
-      --arg reason "$LAST_REASON" \
-      --argjson bytes "$LAST_BYTES" \
-      --argjson lines "${LAST_LINES:-null}" \
-      --argjson threshold_bytes "$MAX_BYTES" \
-      --argjson threshold_lines "$MIN_LINES" \
-      '{ts:$ts,harness:"claude",session:$session,tool:$tool,path:$path,reason:$reason,
-        bytes:$bytes,lines:$lines,threshold_bytes:$threshold_bytes,
-        threshold_lines:$threshold_lines}' 2>/dev/null)
-  fi
+# JSONL line per Read/Bash decision (allow AND deny), written BEFORE any deny
+# JSON. Best-effort only — a logging failure must never change the decision,
+# stdout, or exit code.
+#
+# jq on this host may be the native Windows build, which text-mode-translates
+# \n to \r\n on stdout unless run with -b; since $(...) only strips the
+# trailing \n, an untranslated line would leave a stray \r in the sink.
+#
+# offset/limit (Read) and command (Bash) are pulled straight from the raw
+# hook input on stdin so they keep their exact JSON type/value — no
+# re-quoting through shell args. The two fields are mutually exclusive by
+# design (Read records never carry command; Bash records never carry
+# offset/limit).
+log_event() { # log_event <tool:read|bash> <decision:allow|deny> <reason> <path|""> <bytes|""> <lines|"">
+  local tool="$1" decision="$2" reason="$3" p="$4" bytes="$5" lines="$6" line
+  line=$(printf '%s' "$input" | jq -b -c \
+    --arg tool "$tool" \
+    --arg decision "$decision" \
+    --arg reason "$reason" \
+    --arg path "$p" \
+    --argjson bytes "${bytes:-null}" \
+    --argjson lines "${lines:-null}" \
+    --argjson threshold_bytes "$MAX_BYTES" \
+    --argjson threshold_lines "$MIN_LINES" \
+    '{
+      ts: (now | gmtime | strftime("%Y-%m-%dT%H:%M:%SZ")),
+      harness: "claude",
+      session: (.session_id // null),
+      tool: $tool,
+      decision: $decision,
+      reason: $reason,
+      path: (if $path == "" then null else $path end),
+      bytes: $bytes,
+      lines: $lines,
+      threshold_bytes: $threshold_bytes,
+      threshold_lines: $threshold_lines
+    } + (
+      if $tool == "bash"
+      then {command: (.tool_input.command // "")}
+      else {offset: (.tool_input.offset // null), limit: (.tool_input.limit // null)}
+      end
+    )' 2>/dev/null)
   [ -n "$line" ] || return 0
   mkdir -p .usage 2>/dev/null || true
   { printf '%s\n' "$line" >> .usage/shunt.jsonl; } 2>/dev/null || true
 }
 
-# Oversized check shared by the Read and Bash paths. Prints the redirect
-# reason and returns 1 when oversized; returns 0 otherwise.
+# Oversized check shared by the Read and Bash paths. Always sets LAST_REASON/
+# LAST_BYTES/LAST_LINES (consumed by log_event at the call sites); LAST_MSG is
+# only set — and only meaningful — on the deny path (return 1).
 check_file() { # check_file <path>
-  local p up bytes lines
+  local p up bytes lines stat_out
   p=$1
   up=$(unixpath "$p")
-  bytes=$(byte_size "$up")
+  if ! stat_out=$(stat -c %s -- "$up" 2>/dev/null); then
+    LAST_REASON=missing; LAST_BYTES=""; LAST_LINES=""
+    return 0
+  fi
+  bytes=$stat_out
   if [ "$bytes" -gt "$MAX_BYTES" ]; then
     LAST_REASON=bytes; LAST_BYTES=$bytes; LAST_LINES=""
     LAST_MSG=$(redirect_reason "$p" "$((bytes / 1024)) KB (threshold: $(( MAX_BYTES / 1024 )) KB)")
     return 1
   fi
-  [ "$bytes" -eq 0 ] && return 0
+  if [ "$bytes" -eq 0 ]; then
+    LAST_REASON=under_threshold; LAST_BYTES=0; LAST_LINES=""
+    return 0
+  fi
   lines=$(line_count "$up")
   if [ "$lines" -gt "$MIN_LINES" ]; then
     LAST_REASON=lines; LAST_BYTES=$bytes; LAST_LINES=$lines
     LAST_MSG=$(redirect_reason "$p" "$lines lines (threshold: $MIN_LINES)")
     return 1
   fi
+  LAST_REASON=under_threshold; LAST_BYTES=$bytes; LAST_LINES=$lines
   return 0
 }
 
@@ -230,31 +245,49 @@ is_bounded_head_tail() {
 # NUL-delimited + mapfile: tab/TSV variants break on empty fields (read
 # collapses IFS-whitespace runs) and NUL never appears in JSON string content.
 mapfile -t -d '' F < <(
-  printf '%s' "$input" | jq -j '[.agent_id // "", .tool_name // "", .tool_input.file_path // "", (.tool_input.offset // ""), (.tool_input.limit // ""), (.session_id // "")] | join("\u0000")' 2>/dev/null
+  printf '%s' "$input" | jq -j '[.agent_id // "", .tool_name // "", .tool_input.file_path // "", (.tool_input.offset // ""), (.tool_input.limit // "")] | join("\u0000")' 2>/dev/null
 )
-agent=${F[0]-}; tool=${F[1]-}; file=${F[2]-}; offset=${F[3]-}; limit=${F[4]-}; SESSION=${F[5]-}
+agent=${F[0]-}; tool=${F[1]-}; file=${F[2]-}; offset=${F[3]-}; limit=${F[4]-}
 
-# Subagent calls are the workers: their reads always pass.
-[ -n "$agent" ] && exit 0
+# Subagent calls are the workers: their reads always pass. Read is a
+# per-file decision, so its record keeps the real path; Bash is a
+# whole-command decision, so its record has no single path.
+if [ -n "$agent" ]; then
+  case "$tool" in
+    Read) log_event read allow subagent "$file" "" "" ;;
+    Bash) log_event bash allow subagent "" "" "" ;;
+  esac
+  exit 0
+fi
 
 case "$tool" in
   Read)
-    [ -n "$file" ] || exit 0
+    if [ -z "$file" ]; then
+      log_event read allow no_input "" "" ""
+      exit 0
+    fi
     # A targeted read requires BOTH offset and limit. "0" is a present value
     # for both fields (jq prints it as "0", which is non-empty and != "null").
     # limit alone can equal the default full-read size, and offset alone reads
     # the unbounded rest of the file — neither is targeted.
-    [ -n "$offset" ] && [ "$offset" != "null" ] && [ -n "$limit" ] && [ "$limit" != "null" ] && exit 0
-    if ! check_file "$file"; then
-      log_shunt_block read "$file"
-      deny "$LAST_MSG"
+    if [ -n "$offset" ] && [ "$offset" != "null" ] && [ -n "$limit" ] && [ "$limit" != "null" ]; then
+      log_event read allow targeted "$file" "" ""
+      exit 0
     fi
-    exit 0
+    if check_file "$file"; then
+      log_event read allow "$LAST_REASON" "$file" "$LAST_BYTES" "$LAST_LINES"
+      exit 0
+    fi
+    log_event read deny "$LAST_REASON" "$file" "$LAST_BYTES" "$LAST_LINES"
+    deny "$LAST_MSG"
     ;;
 
   Bash)
     cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty')
-    [ -n "$cmd" ] || exit 0
+    if [ -z "$cmd" ]; then
+      log_event bash allow no_input "" "" ""
+      exit 0
+    fi
     # Contract for Bash commands:
     #   (a) Compound commands (pipes, redirections, ; & backticks, or newlines)
     #       pass untouched — we do NOT try to parse them.
@@ -265,10 +298,19 @@ case "$tool" in
     #       is treated as targeted and skips the size check entirely.
     # pipes, redirections, compound commands and multi-line scripts are targeted
     if printf '%s' "$cmd" | grep -q '[|>;`&]'; then
+      log_event bash allow compound "" "" ""
       exit 0
     fi
-    case "$cmd" in *$'\n'*) exit 0;; esac
-    printf '%s' "$cmd" | grep -qE '^[[:space:]]*(cat|head|tail|less|more|bat|grep|sed|awk|rg|xxd|base64|strings)([[:space:]]|$)' || exit 0
+    case "$cmd" in
+      *$'\n'*)
+        log_event bash allow compound "" "" ""
+        exit 0
+        ;;
+    esac
+    if ! printf '%s' "$cmd" | grep -qE '^[[:space:]]*(cat|head|tail|less|more|bat|grep|sed|awk|rg|xxd|base64|strings)([[:space:]]|$)'; then
+      log_event bash allow verb "" "" ""
+      exit 0
+    fi
     set -f                             # no globbing during parsing; intentional word splitting below
     read -r verb args <<<"$cmd"        # drop leading spaces; keep verb + file args
 
@@ -279,24 +321,31 @@ case "$tool" in
     case "$verb" in
       sed)
         if is_bounded_sed "$args"; then
+          log_event bash allow bounded "" "" ""
           exit 0
         fi
         ;;
       head|tail)
         if is_bounded_head_tail "$args"; then
+          log_event bash allow bounded "" "" ""
           exit 0
         fi
         ;;
     esac
 
+    file_count=0
     # shellcheck disable=SC2086
     for f in $args; do                 # intentional word splitting
       case "$f" in -*) continue;; esac
-      if ! check_file "$f"; then
-        log_shunt_block bash "$f" "$cmd"
+      file_count=$((file_count + 1))
+      if check_file "$f"; then
+        log_event bash allow "$LAST_REASON" "$f" "$LAST_BYTES" "$LAST_LINES"
+      else
+        log_event bash deny "$LAST_REASON" "$f" "$LAST_BYTES" "$LAST_LINES"
         deny "$LAST_MSG"
       fi
     done
+    [ "$file_count" -eq 0 ] && log_event bash allow no_input "" "" ""
     exit 0
     ;;
 esac

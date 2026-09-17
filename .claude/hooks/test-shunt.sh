@@ -40,6 +40,12 @@ trap 'rm -rf "$TDIR"' EXIT
 # 10 lines (under any default threshold)
 { for i in $(seq 1 10); do echo "line $i"; done; } > "$TDIR/small.txt"
 
+# a second small file, for multi-file bash allow-record ordering checks
+{ for i in $(seq 1 5); do echo "other $i"; done; } > "$TDIR/small2.txt"
+
+# zero-byte file (bytes 0 / lines null edge case)
+: > "$TDIR/empty.txt"
+
 # ~70 KB in a single line (byte-threshold trigger, few lines)
 head -c 70000 /dev/zero | tr '\0' 'x' > "$TDIR/fat.json"
 
@@ -297,69 +303,162 @@ else
 fi
 
 # --- shunt.jsonl telemetry --------------------------------------------------
-# Every denied call appends one JSONL line to .usage/shunt.jsonl (relative to
-# cwd, so isolated to $TDIR here — never the repo's real sink).
+# Every Read/Bash decision (allow AND deny) appends one JSONL line to
+# .usage/shunt.jsonl (relative to cwd, so isolated to $TDIR here — never the
+# repo's real sink).
 
 SINK="$TDIR/.usage/shunt.jsonl"
 
-# Line-threshold deny: reason "lines", lines count, no "command" key (Read).
-rm -f "$SINK"
-(cd "$TDIR" && printf '%s' "$(mkinput Read "{\"file_path\":\"$TDIR/big.txt\"}")" | bash "$HOOK" >/dev/null 2>&1)
-if [ -f "$SINK" ]; then
-  LAST=$(tail -n1 "$SINK")
-  if jq -e --arg p "$TDIR/big.txt" '
-      .harness == "claude" and .tool == "read" and .reason == "lines" and
-      .lines == 400 and .path == $p and (has("command") | not)
-    ' >/dev/null 2>&1 <<< "$LAST"; then
+sink_run() { # sink_run <input-json>: clears the sink, runs the hook once.
+  rm -f "$SINK"
+  (cd "$TDIR" && printf '%s' "$1" | bash "$HOOK" >/dev/null 2>&1)
+}
+
+sink_last() { [ -f "$SINK" ] && tail -n1 "$SINK" || printf '%s' ''; }
+sink_count() { [ -f "$SINK" ] && wc -l < "$SINK" || printf '0'; }
+
+assert_jq() { # assert_jq <desc> <json> <jq-filter> [jq-arg-flags...]
+  local desc="$1" json="$2" filter="$3"; shift 3
+  if [ -n "$json" ] && jq -e "$@" "$filter" >/dev/null 2>&1 <<< "$json"; then
     PASS=$((PASS + 1))
   else
-    FAIL=$((FAIL + 1)); echo "FAIL: shunt.jsonl Read/lines record malformed  [line: ${LAST:0:200}]"
+    FAIL=$((FAIL + 1)); echo "FAIL: $desc  [line: ${json:0:220}]"
   fi
-else
-  FAIL=$((FAIL + 1)); echo "FAIL: shunt.jsonl not created after denied Read"
-fi
+}
 
-# Byte-threshold deny: reason "bytes".
-rm -f "$SINK"
-(cd "$TDIR" && printf '%s' "$(mkinput Read "{\"file_path\":\"$TDIR/fat.json\"}")" | bash "$HOOK" >/dev/null 2>&1)
-LAST=$(tail -n1 "$SINK" 2>/dev/null)
-if jq -e '.reason == "bytes"' >/dev/null 2>&1 <<< "$LAST"; then
-  PASS=$((PASS + 1))
-else
-  FAIL=$((FAIL + 1)); echo "FAIL: shunt.jsonl bytes reason missing  [line: ${LAST:0:200}]"
-fi
+# --- Read: deny records now carry decision:"deny" ---------------------------
 
-# Bash cat deny: tool "bash" and "command" carries the raw invocation.
-rm -f "$SINK"
-(cd "$TDIR" && printf '%s' "$(mkinput Bash "{\"command\":\"cat $TDIR/big.txt\"}")" | bash "$HOOK" >/dev/null 2>&1)
-LAST=$(tail -n1 "$SINK" 2>/dev/null)
-if jq -e --arg c "cat $TDIR/big.txt" '.tool == "bash" and (.command // "" | contains($c))' >/dev/null 2>&1 <<< "$LAST"; then
-  PASS=$((PASS + 1))
-else
-  FAIL=$((FAIL + 1)); echo "FAIL: shunt.jsonl bash record missing/incorrect command  [line: ${LAST:0:200}]"
-fi
+sink_run "$(mkinput Read "{\"file_path\":\"$TDIR/big.txt\"}")"
+# shellcheck disable=SC2016
+assert_jq "shunt.jsonl Read/lines deny record" "$(sink_last)" \
+  '.harness == "claude" and .tool == "read" and .decision == "deny" and
+   .reason == "lines" and .lines == 400 and .path == $p and
+   (has("command") | not) and has("offset") and has("limit") and
+   .offset == null and .limit == null' --arg p "$TDIR/big.txt"
 
-# A passing call (small file) must not append anything.
+sink_run "$(mkinput Read "{\"file_path\":\"$TDIR/fat.json\"}")"
+assert_jq "shunt.jsonl Read/bytes deny record" "$(sink_last)" \
+  '.decision == "deny" and .reason == "bytes" and .lines == null'
+
+# --- Bash: deny record carries decision:"deny" + exact command --------------
+
+sink_run "$(mkinput Bash "{\"command\":\"cat $TDIR/big.txt\"}")"
+# shellcheck disable=SC2016
+assert_jq "shunt.jsonl Bash cat deny record" "$(sink_last)" \
+  '.tool == "bash" and .decision == "deny" and .command == $c and
+   .path == $p and (has("offset") | not) and (has("limit") | not)' \
+  --arg c "cat $TDIR/big.txt" --arg p "$TDIR/big.txt"
+
+# --- allow reasons: Read ------------------------------------------------
+
+sink_run "$(mkinput Read "{}")"
+assert_jq "Read no_input (no file_path)" "$(sink_last)" \
+  '.tool == "read" and .decision == "allow" and .reason == "no_input" and
+   .path == null and has("offset") and has("limit") and (has("command") | not)'
+
+sink_run "$(mkinput Read "{\"file_path\":\"$TDIR/big.txt\",\"offset\":10,\"limit\":20}")"
+# shellcheck disable=SC2016
+assert_jq "Read targeted (offset+limit)" "$(sink_last)" \
+  '.decision == "allow" and .reason == "targeted" and .bytes == null and
+   .lines == null and .offset == 10 and .limit == 20 and .path == $p' \
+  --arg p "$TDIR/big.txt"
+
+sink_run "$(mkinput Read "{\"file_path\":\"$TDIR/big.txt\",\"offset\":0,\"limit\":20}")"
+assert_jq "Read targeted offset=0 keeps number type" "$(sink_last)" \
+  '.offset == 0 and (.offset | type) == "number" and .limit == 20'
+
+sink_run "$(mkinput Read "{\"file_path\":\"$TDIR/small.txt\"}")"
+assert_jq "Read under_threshold" "$(sink_last)" \
+  '.decision == "allow" and .reason == "under_threshold" and .bytes > 0 and
+   .lines == 10 and .offset == null and .limit == null'
+
+sink_run "$(mkinput Read "{\"file_path\":\"$TDIR/empty.txt\"}")"
+assert_jq "Read zero-byte file: bytes 0, lines null, under_threshold" "$(sink_last)" \
+  '.decision == "allow" and .reason == "under_threshold" and .bytes == 0 and .lines == null'
+
+sink_run "$(mkinput Read "{\"file_path\":\"$TDIR/does-not-exist.txt\"}")"
+# shellcheck disable=SC2016
+assert_jq "Read missing (stat fails)" "$(sink_last)" \
+  '.decision == "allow" and .reason == "missing" and .bytes == null and
+   .lines == null and .path == $p' --arg p "$TDIR/does-not-exist.txt"
+
+sink_run "$(mkinput Read "{\"file_path\":\"$TDIR/big.txt\"}" '{"agent_id":"ag1"}')"
+# shellcheck disable=SC2016
+assert_jq "Read subagent keeps the real path (per-file decision)" "$(sink_last)" \
+  '.tool == "read" and .decision == "allow" and .reason == "subagent" and
+   .path == $p' --arg p "$TDIR/big.txt"
+
+# --- allow reasons: Bash -------------------------------------------------
+
+sink_run "$(mkinput Bash "{\"command\":\"cat $TDIR/big.txt\"}" '{"agent_id":"ag2"}')"
+# shellcheck disable=SC2016
+assert_jq "Bash subagent: whole-command decision, path null" "$(sink_last)" \
+  '.tool == "bash" and .decision == "allow" and .reason == "subagent" and
+   .path == null and .command == $c' --arg c "cat $TDIR/big.txt"
+
+sink_run "$(mkinput Bash '{"command":""}')"
+assert_jq "Bash no_input: empty command" "$(sink_last)" \
+  '.decision == "allow" and .reason == "no_input" and .path == null and .command == ""'
+
+sink_run "$(mkinput Bash "{\"command\":\"cat -n\"}")"
+assert_jq "Bash no_input: whitelisted verb, zero non-flag args" "$(sink_last)" \
+  '.decision == "allow" and .reason == "no_input" and .path == null and .command == "cat -n"'
+
+sink_run "$(mkinput Bash "{\"command\":\"cat $TDIR/big.txt && echo ok\"}")"
+assert_jq "Bash compound" "$(sink_last)" \
+  '.decision == "allow" and .reason == "compound" and .path == null'
+
+sink_run "$(mkinput Bash "{\"command\":\"ls -la $TDIR\"}")"
+assert_jq "Bash verb not whitelisted" "$(sink_last)" \
+  '.decision == "allow" and .reason == "verb" and .path == null'
+
+sink_run "$(mkinput Bash "{\"command\":\"sed -n 244,260p $TDIR/big.txt\"}")"
+assert_jq "Bash bounded sed" "$(sink_last)" \
+  '.decision == "allow" and .reason == "bounded" and .path == null'
+
+# Multi-file bash: one allow record per non-flag arg, in order.
+sink_run "$(mkinput Bash "{\"command\":\"cat $TDIR/small.txt $TDIR/small2.txt\"}")"
+N=$(sink_count)
+if [ "$N" = 2 ]; then PASS=$((PASS + 1)); else
+  FAIL=$((FAIL + 1)); echo "FAIL: multi-file allow should log 2 records, got $N"
+fi
+# shellcheck disable=SC2016
+assert_jq "multi-file allow: first record" "$(sed -n '1p' "$SINK" 2>/dev/null)" \
+  '.decision == "allow" and .reason == "under_threshold" and .path == $p' --arg p "$TDIR/small.txt"
+# shellcheck disable=SC2016
+assert_jq "multi-file allow: second record" "$(sink_last)" \
+  '.decision == "allow" and .reason == "under_threshold" and .path == $p' --arg p "$TDIR/small2.txt"
+
+# Multi-file bash: allow-then-deny stops at the first oversized file (the
+# grep pattern arg "foo" is itself a "missing" allow record — expected).
+sink_run "$(mkinput Bash "{\"command\":\"grep foo $TDIR/big.txt\"}")"
+N=$(sink_count)
+if [ "$N" = 2 ]; then PASS=$((PASS + 1)); else
+  FAIL=$((FAIL + 1)); echo "FAIL: grep foo big.txt should log 2 records (allow, deny), got $N"
+fi
+assert_jq "allow-then-deny: pattern arg is allow/missing" "$(sed -n '1p' "$SINK" 2>/dev/null)" \
+  '.decision == "allow" and .reason == "missing" and .path == "foo" and .tool == "bash"'
+assert_jq "allow-then-deny: file arg is the deny record" "$(sink_last)" \
+  '.decision == "deny" and .reason == "lines" and .tool == "bash"'
+
+# --- no CR bytes ever reach the sink (native Windows jq text-mode risk) -----
+
 rm -f "$SINK"
 (cd "$TDIR" && printf '%s' "$(mkinput Read "{\"file_path\":\"$TDIR/small.txt\"}")" | bash "$HOOK" >/dev/null 2>&1)
+(cd "$TDIR" && printf '%s' "$(mkinput Bash "{\"command\":\"cat $TDIR/big.txt\"}")" | bash "$HOOK" >/dev/null 2>&1)
 if [ -f "$SINK" ]; then
-  FAIL=$((FAIL + 1)); echo "FAIL: shunt.jsonl created on a passing Read"
+  content=$(cat "$SINK")
+  case "$content" in
+    *$'\r'*) FAIL=$((FAIL + 1)); echo "FAIL: shunt.jsonl contains CR bytes" ;;
+    *) PASS=$((PASS + 1)) ;;
+  esac
 else
-  PASS=$((PASS + 1))
-fi
-
-# A subagent call (top-level agent_id) must not append, even on a big file.
-rm -f "$SINK"
-(cd "$TDIR" && printf '%s' "$(mkinput Read "{\"file_path\":\"$TDIR/big.txt\"}" '{"agent_id":"ag1"}')" | bash "$HOOK" >/dev/null 2>&1)
-if [ -f "$SINK" ]; then
-  FAIL=$((FAIL + 1)); echo "FAIL: shunt.jsonl created on a subagent call"
-else
-  PASS=$((PASS + 1))
+  FAIL=$((FAIL + 1)); echo "FAIL: shunt.jsonl missing for CR check"
 fi
 
 # Unwritable sink (best-effort logging): a regular file named ".usage" makes
-# `mkdir -p .usage` and the telemetry append both fail (ENOTDIR). The deny
-# decision must still be emitted correctly, with no stray error on stderr.
+# `mkdir -p .usage` and the telemetry append both fail (ENOTDIR). Neither the
+# deny decision nor the (silent) allow decision may be affected.
 rm -rf "$TDIR/.usage"
 : > "$TDIR/.usage"
 ERR_OUT=$(cd "$TDIR" && printf '%s' "$(mkinput Read "{\"file_path\":\"$TDIR/big.txt\"}")" | bash "$HOOK" 2>&1 1>/dev/null)
@@ -368,6 +467,14 @@ if [ -z "$ERR_OUT" ] && grep -q "BLOCKED by shunt" <<< "$OUT"; then
   PASS=$((PASS + 1))
 else
   FAIL=$((FAIL + 1)); echo "FAIL: unwritable .usage sink leaks stderr or breaks deny  [stderr: ${ERR_OUT:0:140}] [out: ${OUT:0:140}]"
+fi
+
+ALLOW_ERR=$(cd "$TDIR" && printf '%s' "$(mkinput Read "{\"file_path\":\"$TDIR/small.txt\"}")" | bash "$HOOK" 2>&1 1>/dev/null)
+ALLOW_OUT=$(cd "$TDIR" && printf '%s' "$(mkinput Read "{\"file_path\":\"$TDIR/small.txt\"}")" | bash "$HOOK" 2>/dev/null)
+if [ -z "$ALLOW_ERR" ] && [ -z "$ALLOW_OUT" ]; then
+  PASS=$((PASS + 1))
+else
+  FAIL=$((FAIL + 1)); echo "FAIL: unwritable .usage sink breaks allow decision/output  [stderr: ${ALLOW_ERR:0:140}] [out: ${ALLOW_OUT:0:140}]"
 fi
 rm -f "$TDIR/.usage"
 

@@ -19,11 +19,13 @@ function maxBytes(): number {
   return Number.isFinite(v) && v > 0 ? v : 65_536
 }
 
-function byteSize(p: string): number {
+// `null` means stat failed (missing/unreadable path); distinct from an
+// actual 0-byte file so callers/logging can tell "missing" from "empty".
+function byteSize(p: string): number | null {
   try {
     return statSync(p).size
   } catch {
-    return 0
+    return null
   }
 }
 
@@ -46,8 +48,12 @@ function isTargeted(args: { offset?: unknown; limit?: unknown }): boolean {
   return present(args.offset) && present(args.limit)
 }
 
-async function isOversized(p: string, threshold: number): Promise<{ big: boolean; bytes: number; lines: number | null }> {
+type Hit = { big: boolean; bytes: number | null; lines: number | null }
+
+async function isOversized(p: string, threshold: number): Promise<Hit> {
   const bytes = byteSize(p)
+  // Stat failure (nonexistent/unreadable path): never treat as oversized.
+  if (bytes === null) return { big: false, bytes: null, lines: null }
   // Size check first: avoid reading the whole file just to count lines (slow on /mnt/c).
   if (bytes > maxBytes()) return { big: true, bytes, lines: null }
   if (bytes === 0) return { big: false, bytes, lines: null }
@@ -55,10 +61,18 @@ async function isOversized(p: string, threshold: number): Promise<{ big: boolean
   return { big: lines > threshold, bytes, lines }
 }
 
-function redirectMsg(p: string, hit: { bytes: number; lines: number | null }, threshold: number): string {
+// Maps a measured Hit to the (decision, reason) pair logged for it. Decisions
+// are unchanged from before this instrumentation — only the labeling is new.
+function classify(hit: Hit): { decision: "allow" | "deny"; reason: string } {
+  if (hit.bytes === null) return { decision: "allow", reason: "missing" }
+  if (hit.big) return { decision: "deny", reason: hit.lines != null ? "lines" : "bytes" }
+  return { decision: "allow", reason: "under_threshold" }
+}
+
+function redirectMsg(p: string, hit: { bytes: number | null; lines: number | null }, threshold: number): string {
   const why = hit.lines != null
     ? `${hit.lines} lines (threshold: ${threshold})`
-    : `${(hit.bytes / 1024).toFixed(0)} KB (threshold: ${maxBytes() / 1024} KB)`
+    : `${((hit.bytes ?? 0) / 1024).toFixed(0)} KB (threshold: ${maxBytes() / 1024} KB)`
   return [
     `BLOCKED by shunt: "${p}" has ${why}.`,
     `Do NOT read this file directly — delegate I/O instead:`,
@@ -68,31 +82,42 @@ function redirectMsg(p: string, hit: { bytes: number; lines: number | null }, th
   ].join("\n")
 }
 
-async function logShuntBlock(
-  sinkPath: string,
-  fields: {
-    sessionID: string
-    tool: "read" | "bash"
-    p: string
-    hit: { bytes: number; lines: number | null }
-    threshold: number
-    command?: string
-  },
-): Promise<void> {
+type LogFields = {
+  sessionID: string
+  tool: "read" | "bash"
+  decision: "allow" | "deny"
+  reason: string
+  path: string | null
+  threshold: number
+  bytes?: number | null
+  lines?: number | null
+  command?: string
+  offset?: unknown
+  limit?: unknown
+}
+
+// Single sink writer for every decision (allow and deny). Best-effort: a
+// logging failure must never affect the decision already made by the caller.
+async function logDecision(sinkPath: string, fields: LogFields): Promise<void> {
   try {
     const rec: Record<string, unknown> = {
       ts: new Date().toISOString(),
       harness: "opencode",
       session: fields.sessionID,
       tool: fields.tool,
-      path: fields.p,
-      reason: fields.hit.lines != null ? "lines" : "bytes",
-      bytes: fields.hit.bytes,
-      lines: fields.hit.lines,
+      decision: fields.decision,
+      reason: fields.reason,
+      path: fields.path,
+      bytes: fields.bytes ?? null,
+      lines: fields.lines ?? null,
       threshold_bytes: maxBytes(),
       threshold_lines: fields.threshold,
     }
-    if (fields.tool === "bash") rec.command = fields.command
+    if (fields.tool === "bash") rec.command = fields.command ?? ""
+    if (fields.tool === "read") {
+      rec.offset = fields.offset ?? null
+      rec.limit = fields.limit ?? null
+    }
     await appendFileAsync(sinkPath, JSON.stringify(rec) + "\n")
   } catch {
     // instrumentation must never block the redirect behavior
@@ -139,6 +164,12 @@ function isBoundedHeadTail(args: string[]): boolean {
   return false
 }
 
+function isBoundedCommand(verb: string, args: string[]): boolean {
+  if (verb === "sed") return isBoundedSed(args)
+  if (verb === "head" || verb === "tail") return isBoundedHeadTail(args)
+  return false
+}
+
 export const ShuntPlugin: Plugin = async ({ directory, worktree }) => {
   const sinkDir = path.join(worktree ?? directory ?? ".", ".usage")
   try {
@@ -147,6 +178,110 @@ export const ShuntPlugin: Plugin = async ({ directory, worktree }) => {
     // instrumentation must never break the harness init
   }
   const sinkPath = path.join(sinkDir, "shunt.jsonl")
+
+  // Subagent (delegated) calls always allow, but still get one telemetry
+  // record each — no measurement is performed for them.
+  async function logSubagent(
+    sessionID: string,
+    tool: "read" | "bash",
+    args: unknown,
+    threshold: number,
+  ): Promise<void> {
+    if (tool === "read") {
+      const readArgs = args as { filePath?: string; offset?: unknown; limit?: unknown } | undefined
+      const p = readArgs?.filePath ? path.resolve(directory, readArgs.filePath) : null
+      await logDecision(sinkPath, {
+        sessionID, tool: "read", decision: "allow", reason: "subagent", path: p,
+        offset: readArgs?.offset, limit: readArgs?.limit, threshold,
+      })
+      return
+    }
+    const bashArgs = args as { command?: string } | undefined
+    await logDecision(sinkPath, {
+      sessionID, tool: "bash", decision: "allow", reason: "subagent", path: null,
+      command: bashArgs?.command ?? "", threshold,
+    })
+  }
+
+  async function handleRead(
+    sessionID: string,
+    args: { filePath?: string; offset?: unknown; limit?: unknown },
+    threshold: number,
+  ): Promise<void> {
+    if (!args?.filePath) {
+      await logDecision(sinkPath, {
+        sessionID, tool: "read", decision: "allow", reason: "no_input", path: null,
+        offset: args?.offset, limit: args?.limit, threshold,
+      })
+      return
+    }
+    const p = path.resolve(directory, args.filePath)
+    if (isTargeted(args)) {
+      await logDecision(sinkPath, {
+        sessionID, tool: "read", decision: "allow", reason: "targeted", path: p,
+        offset: args.offset, limit: args.limit, threshold,
+      })
+      return
+    }
+    const hit = await isOversized(p, threshold)
+    const { decision, reason } = classify(hit)
+    await logDecision(sinkPath, {
+      sessionID, tool: "read", decision, reason, path: p,
+      offset: args.offset, limit: args.limit, bytes: hit.bytes, lines: hit.lines, threshold,
+    })
+    if (decision === "deny") throw new Error(redirectMsg(p, hit, threshold))
+  }
+
+  async function handleBash(
+    sessionID: string,
+    args: { command?: string },
+    threshold: number,
+  ): Promise<void> {
+    const rawCmd = args?.command ?? ""
+    const cmd = rawCmd.trim()
+    const allow = (reason: string, path: string | null = null) =>
+      logDecision(sinkPath, { sessionID, tool: "bash", decision: "allow", reason, path, command: rawCmd, threshold })
+
+    // Contract for Bash commands:
+    //   (a) Compound commands (pipes, redirections, ; & backticks, or newlines)
+    //       pass untouched — we do NOT try to parse them.
+    //   (b) Verbs outside the whitelist (python, jq, git show, node, perl...)
+    //       are never size-checked.
+    //   (c) Accepted gap: a piped `sed -n 400,562p | grep` still passes via (a).
+    //       A single bounded read (sed -n N,Mp, head -n N, tail -n N, head/tail -c N)
+    //       is treated as targeted and skips the size check entirely.
+    if (!cmd) return allow("no_input")
+    if (/[|>;`&]/.test(cmd) || cmd.includes("\n")) return allow("compound")
+    const verbMatch = cmd.match(BLOCKED_BASH)
+    if (!verbMatch) return allow("verb")
+    const verb = verbMatch[1]
+    const cmdArgs = cmd
+      .slice(verbMatch[0].length)
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+
+    // Single-command bounded reads are targeted: the explicit window bounds
+    // the read, so we skip the size check. Caveat: `head -c N` on a 70 KB
+    // single-line file still transfers N bytes of that file; that is accepted
+    // because it is explicitly bounded.
+    if (isBoundedCommand(verb, cmdArgs)) return allow("bounded")
+
+    const files = cmdArgs.filter((a) => a && !a.startsWith("-"))
+    if (files.length === 0) return allow("no_input")
+
+    for (const f of files) {
+      const p = path.resolve(directory, f)
+      const hit = await isOversized(p, threshold)
+      const { decision, reason } = classify(hit)
+      await logDecision(sinkPath, {
+        sessionID, tool: "bash", decision, reason, path: p, command: rawCmd,
+        bytes: hit.bytes, lines: hit.lines, threshold,
+      })
+      if (decision === "deny") throw new Error(redirectMsg(p, hit, threshold))
+    }
+  }
+
   return {
     event: async ({ event }) => {
       const info = (event as { properties?: { info?: { id?: string; parentID?: string } } })
@@ -159,61 +294,22 @@ export const ShuntPlugin: Plugin = async ({ directory, worktree }) => {
     },
 
     "tool.execute.before": async (input, output) => {
-      // Never block subagent reads — they are the worker.
-      if (delegated.has(input.sessionID)) return
-
       const threshold = minLines()
 
-      if (input.tool === "read") {
-        const args = output.args as { filePath?: string; offset?: unknown; limit?: unknown }
-        if (!args?.filePath || isTargeted(args)) return
-        const p = path.resolve(directory, args.filePath)
-        const hit = await isOversized(p, threshold)
-        if (hit.big) {
-          await logShuntBlock(sinkPath, { sessionID: input.sessionID, tool: "read", p, hit, threshold })
-          throw new Error(redirectMsg(p, hit, threshold))
+      // Never block subagent reads/bash — they are the worker. Still logged.
+      if (delegated.has(input.sessionID)) {
+        if (input.tool === "read" || input.tool === "bash") {
+          await logSubagent(input.sessionID, input.tool, output.args, threshold)
         }
         return
       }
 
+      if (input.tool === "read") {
+        return handleRead(input.sessionID, output.args as { filePath?: string; offset?: unknown; limit?: unknown }, threshold)
+      }
+
       if (input.tool === "bash") {
-        const args = output.args as { command?: string }
-        const cmd = args?.command?.trim() ?? ""
-        // Contract for Bash commands:
-        //   (a) Compound commands (pipes, redirections, ; & backticks, or newlines)
-        //       pass untouched — we do NOT try to parse them.
-        //   (b) Verbs outside the whitelist (python, jq, git show, node, perl...)
-        //       are never size-checked.
-        //   (c) Accepted gap: a piped `sed -n 400,562p | grep` still passes via (a).
-        //       A single bounded read (sed -n N,Mp, head -n N, tail -n N, head/tail -c N)
-        //       is treated as targeted and skips the size check entirely.
-        if (!cmd || /[|>;`&]/.test(cmd) || cmd.includes("\n")) return
-        const verbMatch = cmd.match(BLOCKED_BASH)
-        if (!verbMatch) return
-        const verb = verbMatch[1]
-        const cmdArgs = cmd
-          .slice(verbMatch[0].length)
-          .trim()
-          .split(/\s+/)
-          .filter(Boolean)
-
-        // Single-command bounded reads are targeted: the explicit window bounds
-        // the read, so we skip the size check. Caveat: `head -c N` on a 70 KB
-        // single-line file still transfers N bytes of that file; that is accepted
-        // because it is explicitly bounded.
-        if (verb === "sed" && isBoundedSed(cmdArgs)) return
-        if ((verb === "head" || verb === "tail") && isBoundedHeadTail(cmdArgs)) return
-
-        const files = cmdArgs.filter((a) => a && !a.startsWith("-"))
-        for (const f of files) {
-          const p = path.resolve(directory, f)
-          const hit = await isOversized(p, threshold)
-          if (hit.big) {
-            await logShuntBlock(sinkPath, { sessionID: input.sessionID, tool: "bash", p, hit, threshold, command: cmd })
-            throw new Error(redirectMsg(p, hit, threshold))
-          }
-        }
-        return
+        return handleBash(input.sessionID, output.args as { command?: string }, threshold)
       }
     },
   }
