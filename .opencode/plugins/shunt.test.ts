@@ -22,10 +22,10 @@ function sinkPath(): string {
   return join(dir, ".usage", "shunt.jsonl")
 }
 
-async function callRead(plugin: any, sessionID: string, filePath: string) {
+async function callRead(plugin: any, sessionID: string, filePath: string, extra: { offset?: unknown; limit?: unknown } = {}) {
   return plugin["tool.execute.before"](
     { tool: "read", sessionID, callID: "call1" },
-    { args: { filePath } },
+    { args: { filePath, ...extra } },
   )
 }
 
@@ -137,6 +137,39 @@ describe("shunt plugin telemetry", () => {
 
     // The redirect Error must still be thrown even though the sink write failed.
     await expect(callRead(plugin, "ses5", filePath)).rejects.toThrow("BLOCKED by shunt")
+  })
+})
+
+describe("shunt plugin read targeting", () => {
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "shunt-test."))
+  })
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("read big file with offset alone is denied", async () => {
+    const filePath = join(dir, "big-lines.txt")
+    writeFileSync(filePath, "x\n".repeat(400))
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    await expect(callRead(plugin, "ses-read-offset", filePath, { offset: 10 })).rejects.toThrow("BLOCKED by shunt")
+  })
+
+  test("read big file with offset and limit is targeted", async () => {
+    const filePath = join(dir, "big-lines.txt")
+    writeFileSync(filePath, "x\n".repeat(400))
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    await expect(callRead(plugin, "ses-read-both", filePath, { offset: 10, limit: 20 })).resolves.toBeUndefined()
+  })
+
+  test("read big file with offset=0 and limit is targeted", async () => {
+    const filePath = join(dir, "big-lines.txt")
+    writeFileSync(filePath, "x\n".repeat(400))
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    await expect(callRead(plugin, "ses-read-zero", filePath, { offset: 0, limit: 20 })).resolves.toBeUndefined()
   })
 })
 
@@ -278,5 +311,187 @@ describe("shunt plugin bash blocking", () => {
     expect(rec.tool).toBe("bash")
     expect(rec.command).toBe(command)
     expect(rec.path).toBe(filePath)
+  })
+
+  test("bounded sed -n 244,260p on big file passes", async () => {
+    const filePath = join(dir, "big-lines.txt")
+    writeFileSync(filePath, "x\n".repeat(400))
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    await expect(callBash(plugin, "ses16", `sed -n 244,260p ${filePath}`)).resolves.toBeUndefined()
+    expect(existsSync(sinkPath())).toBe(false)
+  })
+
+  test("bounded sed -n quoted 244,260p on big file passes", async () => {
+    const filePath = join(dir, "big-lines.txt")
+    writeFileSync(filePath, "x\n".repeat(400))
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    await expect(callBash(plugin, "ses17", `sed -n '244,260p' ${filePath}`)).resolves.toBeUndefined()
+    expect(existsSync(sinkPath())).toBe(false)
+  })
+
+  test("bounded head -n 20 on big file passes", async () => {
+    const filePath = join(dir, "big-lines.txt")
+    writeFileSync(filePath, "x\n".repeat(400))
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    await expect(callBash(plugin, "ses18", `head -n 20 ${filePath}`)).resolves.toBeUndefined()
+    expect(existsSync(sinkPath())).toBe(false)
+  })
+
+  test("bounded head -c 500 on big file passes", async () => {
+    const filePath = join(dir, "big-lines.txt")
+    writeFileSync(filePath, "x\n".repeat(400))
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    await expect(callBash(plugin, "ses19", `head -c 500 ${filePath}`)).resolves.toBeUndefined()
+    expect(existsSync(sinkPath())).toBe(false)
+  })
+
+  test("bounded tail -n 20 on big file passes", async () => {
+    const filePath = join(dir, "big-lines.txt")
+    writeFileSync(filePath, "x\n".repeat(400))
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    await expect(callBash(plugin, "ses20", `tail -n 20 ${filePath}`)).resolves.toBeUndefined()
+    expect(existsSync(sinkPath())).toBe(false)
+  })
+
+  test("bounded head -n 200 on fat single-line file passes", async () => {
+    const filePath = join(dir, "big-bytes.txt")
+    writeFileSync(filePath, "y".repeat(70_000))
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    await expect(callBash(plugin, "ses21", `head -n 200 ${filePath}`)).resolves.toBeUndefined()
+    expect(existsSync(sinkPath())).toBe(false)
+  })
+
+  test("sed -n 100,$p on big file is denied", async () => {
+    const filePath = join(dir, "big-lines.txt")
+    writeFileSync(filePath, "x\n".repeat(400))
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    await expect(callBash(plugin, "ses22", `sed -n '100,$p' ${filePath}`)).rejects.toThrow("BLOCKED by shunt")
+  })
+
+  test("tail -n +100 on big file is denied", async () => {
+    const filePath = join(dir, "big-lines.txt")
+    writeFileSync(filePath, "x\n".repeat(400))
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    await expect(callBash(plugin, "ses23", `tail -n +100 ${filePath}`)).rejects.toThrow("BLOCKED by shunt")
+  })
+
+  test("sed without -n on big file is denied", async () => {
+    const filePath = join(dir, "big-lines.txt")
+    writeFileSync(filePath, "x\n".repeat(400))
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    await expect(callBash(plugin, "ses24", `sed '244,260p' ${filePath}`)).rejects.toThrow("BLOCKED by shunt")
+  })
+
+  test("compound cat && echo ok on big file passes", async () => {
+    const filePath = join(dir, "big-lines.txt")
+    writeFileSync(filePath, "x\n".repeat(400))
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    await expect(callBash(plugin, "ses25", `cat ${filePath} && echo ok`)).resolves.toBeUndefined()
+    expect(existsSync(sinkPath())).toBe(false)
+  })
+
+  test("compound sed -n 100,$p; echo ok on big file passes (accepted gap)", async () => {
+    const filePath = join(dir, "big-lines.txt")
+    writeFileSync(filePath, "x\n".repeat(400))
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    await expect(callBash(plugin, "ses26", `sed -n '100,$p' ${filePath}; echo ok`)).resolves.toBeUndefined()
+    expect(existsSync(sinkPath())).toBe(false)
+  })
+
+  test("python3 read of big file passes (uncovered verb)", async () => {
+    const filePath = join(dir, "big-lines.txt")
+    writeFileSync(filePath, "x\n".repeat(400))
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    await expect(callBash(plugin, "ses27", `python3 -c 'print(open("${filePath}").read())'`)).resolves.toBeUndefined()
+    expect(existsSync(sinkPath())).toBe(false)
+  })
+
+  test("multi-line bash command passes untouched", async () => {
+    const filePath = join(dir, "big-lines.txt")
+    writeFileSync(filePath, "x\n".repeat(400))
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    await expect(callBash(plugin, "ses28", `cat ${filePath}\necho ok`)).resolves.toBeUndefined()
+    expect(existsSync(sinkPath())).toBe(false)
+  })
+
+  test("verb boundary requires whitespace (head-file passes untouched)", async () => {
+    const filePath = join(dir, "big-lines.txt")
+    writeFileSync(filePath, "x\n".repeat(400))
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    await expect(callBash(plugin, "ses29", `head-file ${filePath}`)).resolves.toBeUndefined()
+    expect(existsSync(sinkPath())).toBe(false)
+  })
+
+  test("head -n +20 is denied (plus prefix is unbounded)", async () => {
+    const filePath = join(dir, "big-lines.txt")
+    writeFileSync(filePath, "x\n".repeat(400))
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    await expect(callBash(plugin, "ses30", `head -n +20 ${filePath}`)).rejects.toThrow("BLOCKED by shunt")
+  })
+
+  test("tail -c +100 is denied (start-at-byte to EOF is unbounded)", async () => {
+    const filePath = join(dir, "big-lines.txt")
+    writeFileSync(filePath, "x\n".repeat(400))
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    await expect(callBash(plugin, "ses31", `tail -c +100 ${filePath}`)).rejects.toThrow("BLOCKED by shunt")
+  })
+
+  test("sed -n '244, 260p' is denied (space inside range)", async () => {
+    const filePath = join(dir, "big-lines.txt")
+    writeFileSync(filePath, "x\n".repeat(400))
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    await expect(callBash(plugin, "ses32", `sed -n '244, 260p' ${filePath}`)).rejects.toThrow("BLOCKED by shunt")
+  })
+
+  test("head -n0 is bounded and passes", async () => {
+    const filePath = join(dir, "big-lines.txt")
+    writeFileSync(filePath, "x\n".repeat(400))
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    await expect(callBash(plugin, "ses33", `head -n0 ${filePath}`)).resolves.toBeUndefined()
+    expect(existsSync(sinkPath())).toBe(false)
+  })
+
+  test("head -n 0 is bounded and passes", async () => {
+    const filePath = join(dir, "big-lines.txt")
+    writeFileSync(filePath, "x\n".repeat(400))
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    await expect(callBash(plugin, "ses34", `head -n 0 ${filePath}`)).resolves.toBeUndefined()
+    expect(existsSync(sinkPath())).toBe(false)
+  })
+
+  test("sed -n 1p is bounded and passes", async () => {
+    const filePath = join(dir, "big-lines.txt")
+    writeFileSync(filePath, "x\n".repeat(400))
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    await expect(callBash(plugin, "ses35", `sed -n 1p ${filePath}`)).resolves.toBeUndefined()
+    expect(existsSync(sinkPath())).toBe(false)
+  })
+
+  test("sed -ne '100p' is a script, not a window, and is denied", async () => {
+    const filePath = join(dir, "big-lines.txt")
+    writeFileSync(filePath, "x\n".repeat(400))
+
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    await expect(callBash(plugin, "ses36", `sed -ne '100p' ${filePath}`)).rejects.toThrow("BLOCKED by shunt")
   })
 })

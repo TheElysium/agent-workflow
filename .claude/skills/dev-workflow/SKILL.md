@@ -14,6 +14,7 @@ Multi-phase workflow. The main session is the default orchestrator.
 - Restate the spec in the plan before writing any code (problem, solution, implementation decisions, out of scope). Do not hardcode file paths in the spec or PRD — keep them at the `file:line` level in delegation prompts only.
 - If the spec is ambiguous, incomplete, or missing → interview the user, one question at a time, each with your recommended answer. If a question can be answered by exploring the codebase, explore instead of asking. Never guess requirements.
 - Design check: sketch the modules to build or modify. Favor deep modules (rich functionality behind a small, stable, testable interface); confirm the sketch with the user before coding.
+- A UI slice (new component, template/CSS/markup change) states its visual target before implementation: a reference component, a placement on a named page, or an ASCII mockup confirmed via AskUserQuestion previews. No target → NEEDS_CLARIFICATION.
 - Delegate heavy codebase exploration to `explore` / `bulk-reader`. Give `explore` a question, not a territory: "where is X computed today, and is there more than one implementation?" beats "map the X module".
 
 **Output format**: the restated spec as short structured prose (Problem / Solution / Decisions / Out of scope); interview questions one at a time, each with the recommended answer.
@@ -29,6 +30,8 @@ Multi-phase workflow. The main session is the default orchestrator.
 - Persist the plan: for tasks spanning multiple sessions, create `docs/tasks/<slug>.md` with the extracted spec, decisions, todo state, and gate status. Sessions read it before resuming. The status header (current slice, commit, next step) is updated in the same commit as the slice it describes — never as a follow-up edit.
 - Memory is compressed, not accumulated. On task closure, compress `docs/tasks/<slug>.md` down to the durable outcome (final spec, decisions, retrospective lessons) and mark it archived; only open tasks stay as live plan files. Never grow an exhaustive journal — the file must shrink to knowledge at closure.
 - Log subagent metrics as a line in `docs/tasks/<slug>.md` at each subagent's completion — every subagent, every round, gate-keeper and re-review included. Format: `subagent | tokens | tool_uses | duration | retries | review_iterations | gate_failures | outcome`. Token counts come from the usage sink, not estimates: `scripts/usage-report.sh --since <task-start-ts>` aggregates `.usage/usage.jsonl` (fed by the opencode `usage-log` plugin and the Claude Code `SessionEnd` hook). Conversation compaction erases them; the plan file is the only durable record. These lines aggregate into cost per successful task (tokens spent per mergeable change) — not cost per agent.
+- One write per log update (one Edit or one Bash append).
+- Every workflow report adds orchestrator cost (turns, output, cache reads, billed volume) and per-thread tool usage (counts, failures, blocks): `scripts/session-tools.sh <session.jsonl> --subagents <dir> --summary`.
 
 **Output format**: a tracked todo list (todo tool), slices with `HITL`/`AFK` labels and dependency order — no narrative paragraph.
 
@@ -44,7 +47,7 @@ Multi-phase workflow. The main session is the default orchestrator.
 | Prototype / throwaway | Proof form declared explicitly in the spec |
 | Review fixes | Edit the test first, watch it fail, then fix (TDD again) |
 
-- Review fixes go through TDD too: edit the test first, watch it fail, then change the implementation.
+- The orchestrator edits code with Edit/Write. Shell edits (`sed -i`, `awk`, Python splices) only for one-line mechanical changes (rename, single-token substitution); never route around the shunt hook.
 - Lint: follow the project's configured linter; if none, apply a strict default for the stack (e.g. `clippy -D warnings`, `ruff --strict`, `eslint` strict) and tell the user.
 - Cyclomatic complexity: target ≤ 10 per function. Above the threshold → refactor or explicitly justify.
 - Apply the stack's formatter.
@@ -80,6 +83,8 @@ format: cargo fmt --check        # optional
 - Local enforcement is the default: gates run before a task is done and before commit — no CI needed. CI mirroring `.gates.yml` as `.github/workflows/ci.yml` is optional, only for projects whose CI you control.
 - Dispatch `gate-keeper` as its own explicit step after every `implementer` run, even for a slice that looks trivial — never let the `reviewer` or the orchestrator absorb the gate run informally.
 - UI/visual work that no automated gate can catch → an explicit manual-QA todo item (e.g. "run the app, click through X"), never implicit. An open manual-QA item on a surface blocks starting the next slice that builds on that same surface.
+- UI slices: implement → gate-keeper → author screenshot (HITL manual-QA item) → iterate against the visual target → one reviewer round on the final diff.
+- Design iterations: the orchestrator first writes the screenshot feedback as a target quoting the author (subagents cannot see pasted images). Structural rework (new component, markup across files, 2+ files) → `implementer`; visual tweaks (CSS, spacing, wording, one file) → orchestrator; gate-keeper after either.
 
 **Output format**: a structured pass/fail table per `.gates.yml` command, with no interpretation or rephrasing.
 
@@ -88,6 +93,7 @@ format: cargo fmt --check        # optional
 - One branch per task: `feat/<scope>`, `fix/<scope>`, `chore/<scope>`.
 - Conventional Commits (feat, fix, chore, docs, refactor, test) — short, present tense.
 - Committing without asking is allowed (on the task branch).
+- Re-run `gate-keeper` after any reviewer-driven fix, before commit. An orchestrator-side check is not a gate.
 - Push only when the user explicitly asks (a permission prompt will confirm). No force-push, no hook bypass, no secrets in commits.
 
 **Output format**: the commit message in strict Conventional Commits, one summary line plus short bullets when needed.
@@ -97,7 +103,8 @@ format: cargo fmt --check        # optional
 - Subagents start with a fresh context: every delegation prompt must be self-contained (extracted spec, exact task, `file:line` anchors, stack conventions, acceptance criteria). Never rely on session context.
 - Include known environment constraints in every delegation prompt (CI toolchain gaps, OS quirks, host-dependent test hazards).
 - Subagent outputs: structured bullets only, no file dumps.
-- Launch independent delegations in the same message to parallelize. `gate-keeper` and `reviewer` are both read-only on the same tree — dispatch them in parallel after implementation.
+- After dispatching, end the turn; never poll with blocking `TaskOutput`.
+- Launch independent delegations in the same message. `gate-keeper` and `reviewer` are read-only: dispatch them in parallel after implementation (UI slices: reviewer after the design iterations).
 - Reviewer delegation: every reviewer prompt includes the output of `scripts/review-checklist.sh` (deterministic, per-file checklist) plus the spec/acceptance criteria; the reviewer must cover every listed file. Checklist > ~10 files → split into parallel `reviewer` runs, each with its own sub-checklist; aggregate verdicts (a single REQUEST_CHANGES blocks). LLM review never enters `.gates.yml` — gates stay reproducible.
 - When splitting parallel `implementer` work, balance by estimated workload, not only file ownership — an uneven split keeps the critical path as long as the heaviest task.
 - Parallel hypothesis testing (optional, expensive): for major architectural decisions on HITL slices, explore 2–3 candidate designs via parallel `implementer` runs against throwaway branches, then evaluate and keep the best. Never use by default — the cost must be justified by the decision's irreversibility.
@@ -111,6 +118,6 @@ format: cargo fmt --check        # optional
 - `reviewer` — read-only peer review of the diff; carries the intent gate (dimension 1) and catches cross-layer inconsistency no gate can catch. Commit only after APPROVE + green gates.
 - `explore`, `bulk-reader` — phase 1 exploration.
 - `code-writer` — test scaffolding and repetitive code matching existing patterns.
-- Re-review loop: after REQUEST_CHANGES, fix everything, then send the corrected diff back to the same reviewer (resume the session when possible). A commit requires a final APPROVE on the latest diff — an old APPROVE never carries over; gates stay green between rounds. Review fixes go through TDD too: edit the test first, watch it fail, then change the implementation.
+- Re-review loop: after REQUEST_CHANGES, fix everything, then send the corrected diff back to the same reviewer (resume the session when possible). A commit requires a final APPROVE on the latest diff; gates stay green between rounds.
 
 Flow for a substantial task: spec → decompose → explore (parallel) → implementer (TDD, parallel) → gate-keeper → reviewer → fix/re-review loop → commit (no push) → next todo.

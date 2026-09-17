@@ -7,7 +7,7 @@ import { appendFile as appendFileAsync } from "node:fs/promises"
 const DELEGATED_MAX = 4096
 const delegated = new Set<string>()
 
-const BLOCKED_BASH = /^(cat|head|tail|less|more|bat|grep|sed|awk|rg|xxd|base64|strings)\b/
+const BLOCKED_BASH = /^(cat|head|tail|less|more|bat|grep|sed|awk|rg|xxd|base64|strings)(?=\s|$)/
 
 function minLines(): number {
   const v = Number(process.env.SHUNT_MIN_LINES)
@@ -37,8 +37,13 @@ async function lineCount(p: string): Promise<number> {
 }
 
 function isTargeted(args: { offset?: unknown; limit?: unknown }): boolean {
-  // `limit` alone can equal the default full-read size — only a real offset is targeted.
-  return args.offset != null
+  // A targeted read requires BOTH offset and limit. `0` counts as present for
+  // both fields; `false` and `""` count as absent (matches shunt.sh jq
+  // extraction + [ -n ... ] test). limit alone can equal the default full-read
+  // size, and an offset alone reads the unbounded rest of the file — neither
+  // is targeted.
+  const present = (v: unknown) => v != null && v !== false && v !== ""
+  return present(args.offset) && present(args.limit)
 }
 
 async function isOversized(p: string, threshold: number): Promise<{ big: boolean; bytes: number; lines: number | null }> {
@@ -59,7 +64,7 @@ function redirectMsg(p: string, hit: { bytes: number; lines: number | null }, th
     `Do NOT read this file directly — delegate I/O instead:`,
     `  - For analysis/questions across files (incl. minified JSON like Grafana dashboards): use the task tool with subagent "bulk-reader" (pass file paths + your question; you only consume the summary).`,
     `  - For boilerplate generation: use the task tool with subagent "code-writer" (pass spec + reference file + target path).`,
-    `  - If you must edit a specific section of this file, do a targeted read with offset/limit — that is allowed.`,
+    `  - If you must edit a specific section of this file, do a targeted read with BOTH offset and limit (an offset alone reads the unbounded rest of the file) — that is allowed.`,
   ].join("\n")
 }
 
@@ -92,6 +97,46 @@ async function logShuntBlock(
   } catch {
     // instrumentation must never block the redirect behavior
   }
+}
+
+function stripQuotes(a: string): string {
+  if (a.length < 2) return a
+  if ((a.startsWith('"') && a.endsWith('"')) || (a.startsWith("'") && a.endsWith("'"))) {
+    return a.slice(1, -1)
+  }
+  return a
+}
+
+function isBoundedSed(args: string[]): boolean {
+  let hasN = false
+  for (const a of args) {
+    if (a === "-n" || a === "--quiet" || a === "--silent") hasN = true
+    const stripped = stripQuotes(a)
+    // Any '$' in a script means read to EOF — unbounded.
+    if (stripped.includes("$")) return false
+  }
+  if (!hasN) return false
+  for (const a of args) {
+    const stripped = stripQuotes(a)
+    if (/^[0-9]+(,[0-9]+)?p$/.test(stripped)) return true
+  }
+  return false
+}
+
+function isBoundedHeadTail(args: string[]): boolean {
+  let expectNum = false
+  for (const a of args) {
+    if (expectNum) {
+      return /^[0-9]+$/.test(a)
+    }
+    if (a === "-n" || a === "-c") {
+      expectNum = true
+      continue
+    }
+    const merged = a.match(/^-(n|c)([0-9]+)$/)
+    if (merged) return true
+  }
+  return false
 }
 
 export const ShuntPlugin: Plugin = async ({ directory, worktree }) => {
@@ -134,13 +179,32 @@ export const ShuntPlugin: Plugin = async ({ directory, worktree }) => {
       if (input.tool === "bash") {
         const args = output.args as { command?: string }
         const cmd = args?.command?.trim() ?? ""
-        // Pipes, redirections, and compound commands are targeted — pass through.
-        if (!cmd || /[|>;`$&]/.test(cmd)) return
-        if (!BLOCKED_BASH.test(cmd)) return
-        const files = cmd
-          .replace(BLOCKED_BASH, "")
+        // Contract for Bash commands:
+        //   (a) Compound commands (pipes, redirections, ; & backticks, or newlines)
+        //       pass untouched — we do NOT try to parse them.
+        //   (b) Verbs outside the whitelist (python, jq, git show, node, perl...)
+        //       are never size-checked.
+        //   (c) Accepted gap: a piped `sed -n 400,562p | grep` still passes via (a).
+        //       A single bounded read (sed -n N,Mp, head -n N, tail -n N, head/tail -c N)
+        //       is treated as targeted and skips the size check entirely.
+        if (!cmd || /[|>;`&]/.test(cmd) || cmd.includes("\n")) return
+        const verbMatch = cmd.match(BLOCKED_BASH)
+        if (!verbMatch) return
+        const verb = verbMatch[1]
+        const cmdArgs = cmd
+          .slice(verbMatch[0].length)
+          .trim()
           .split(/\s+/)
-          .filter((a) => a && !a.startsWith("-"))
+          .filter(Boolean)
+
+        // Single-command bounded reads are targeted: the explicit window bounds
+        // the read, so we skip the size check. Caveat: `head -c N` on a 70 KB
+        // single-line file still transfers N bytes of that file; that is accepted
+        // because it is explicitly bounded.
+        if (verb === "sed" && isBoundedSed(cmdArgs)) return
+        if ((verb === "head" || verb === "tail") && isBoundedHeadTail(cmdArgs)) return
+
+        const files = cmdArgs.filter((a) => a && !a.startsWith("-"))
         for (const f of files) {
           const p = path.resolve(directory, f)
           const hit = await isOversized(p, threshold)
