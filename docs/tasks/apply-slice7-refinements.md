@@ -41,8 +41,14 @@ Blocks: 1 pre-commit (Git Bash lacks shellcheck/gitleaks) → re-committed from 
 - gate-keeper (Git Bash run) ran lint/test verbatim first, then spent ~2 min on `find /c` for shellcheck and re-ran the `test` chain per component with `| tail -50` (sast with `| head -50`). Verdict stayed RED, but pipes break the never-narrow letter and cost ~5 min.
 - FLAG regex is noise-dominated: 22/27 flags are Read/Grep content or passing test summaries (`FAIL=0`, "shunt" in file text).
 
-## Follow-ups
+## Post-closure
 
-- Tests for `summ()` tool branches beyond Bash/Read, `-h`, unknown option.
-- `.opencode/agent/gate-keeper.md` lags the Claude copy (never-narrow, run-once rules absent).
-- Done post-closure: FLAG limited to Bash/PowerShell + regex ignores `FAIL=0` / `0 failed` / bare `shunt` (27 → 11 flags on the batch C session); gate-keeper.md run-once rule (exit 127 → FAIL at once, no per-component re-runs).
+- 8f76a64 — FLAG limited to Bash/PowerShell + regex ignores `FAIL=0` / `0 failed` / bare `shunt` (27 → 11 flags on the batch C session); gate-keeper.md run-once rule (exit 127 → FAIL at once, no per-component re-runs).
+- Follow-ups closed: `summ()` per-tool tests, `-h`, unknown option, multi-line `0 failed`; `.opencode/agent/gate-keeper.md` synced (never-narrow, run-once); `FAIL (tool missing)` label. Test 18 caught a crash: AskUserQuestion without `questions` aborted the whole log (rc 5) → guarded.
+
+Subagents:
+
+- gate-keeper (WSL, FLAG fix) | 13894 | 5 | 90s | 0 | 0 | 0 | GREEN
+- reviewer (FLAG fix) | 43694 | 9 | 189s | 0 | 1 | 0 | APPROVE (minor/nits deferred)
+- gate-keeper (WSL, follow-ups) | 13440 | 5 | 80s | 0 | 0 | 0 | GREEN
+- reviewer (follow-ups) | 34673 | 7 | 104s | 0 | 1 | 0 | APPROVE (minor: test 19 reuses test 4 fixture, as test 16 does)

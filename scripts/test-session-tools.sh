@@ -214,25 +214,29 @@ else
 fi
 
 # --- 17. FLAG scope + regex precision -----------------------------------------
-# flag_case <desc> <tool> <input-json> <result-text> <want-status>
-flag_case() {
-  local desc="$1" tool="$2" input="$3" text="$4" want="$5"
+# tool_case <desc> <field> <tool> <input-json> <result-text> <want>
+#   one tool call + its result; compares TSV column <field> of the single row.
+tool_case() {
+  local desc="$1" field="$2" tool="$3" input="$4" text="$5" want="$6"
   {
-    jq -nc -b --arg n "$tool" --argjson i "$input" \
+    jq -b -nc --arg n "$tool" --argjson i "$input" \
       '{type:"assistant",timestamp:"2026-09-16T12:00:00.000Z",message:{role:"assistant",content:[{type:"tool_use",id:"tu_f",name:$n,input:$i}]}}'
-    jq -nc -b --arg t "$text" \
+    jq -b -nc --arg t "$text" \
       '{type:"user",timestamp:"2026-09-16T12:00:01.000Z",message:{role:"user",content:[{type:"tool_result",tool_use_id:"tu_f",is_error:false,content:[{type:"text",text:$t}]}]}}'
-  } > "$R/flag-case.jsonl"
-  run "$R/flag-case.jsonl"
+  } > "$R/tool-case.jsonl"
+  run "$R/tool-case.jsonl"
   local got
-  got="$(printf '%s' "$OUT" | cut -f5)"
+  got="$(printf '%s' "$OUT" | cut -f"$field")"
   if [ "$RC" = 0 ] && [ "$got" = "$want" ]; then
     PASS=$((PASS + 1))
   else
     FAIL=$((FAIL + 1))
-    echo "FAIL: $desc (want status='$want', got '$got', rc=$RC)  [out: ${OUT:0:200}]"
+    echo "FAIL: $desc (want '$want', got '$got', rc=$RC)  [out: ${OUT:0:200}]"
   fi
 }
+
+# flag_case <desc> <tool> <input-json> <result-text> <want-status>
+flag_case() { tool_case "$1" 5 "$2" "$3" "$4" "$5"; }
 
 # Content tools never FLAG, whatever the text says.
 flag_case "Read content with failure words is not flagged" Read '{"file_path":"a.md"}' "BLOCKED by shunt: Error: FAIL failed" ""
@@ -251,6 +255,41 @@ flag_case "Bash 'command failed' is flagged" Bash '{"command":"t"}' "npm ERR! co
 flag_case "Bash BLOCKED is flagged" Bash '{"command":"t"}' "BLOCKED by shunt: file too large" "FLAG"
 flag_case "Bash exit code is flagged" Bash '{"command":"t"}' "Exit code 2" "FLAG"
 flag_case "PowerShell Error: is flagged" PowerShell '{"command":"t"}' "Error: access denied" "FLAG"
+# Multi-line output: '0 failed' at line start is a pass, '10 failed' is not.
+flag_case "Bash '0 failed' at line start is not flagged" Bash '{"command":"t"}' $'32 passed\n0 failed' ""
+flag_case "Bash '10 failed' at line start is flagged" Bash '{"command":"t"}' $'5 passed\n10 failed' "FLAG"
+
+# --- 18. summary column per tool ----------------------------------------------
+# summ_case <desc> <tool> <input-json> <want-summary>
+summ_case() { tool_case "$1" 4 "$2" "$3" "ok" "$4"; }
+
+summ_case "Read without offset/limit" Read '{"file_path":"a.md"}' "a.md"
+summ_case "Read with limit only" Read '{"file_path":"a.md","limit":5}' "a.md [offset=- limit=5]"
+summ_case "Edit shows file path" Edit '{"file_path":"a.sh","old_string":"x","new_string":"y"}' "a.sh"
+summ_case "Write shows file path" Write '{"file_path":"b.md","content":"z"}' "b.md"
+summ_case "Grep shows pattern/path/glob" Grep '{"pattern":"foo","path":"src","glob":"*.sh"}' "pattern=foo path=src glob=*.sh"
+summ_case "Grep with pattern only" Grep '{"pattern":"foo"}' "pattern=foo path= glob="
+summ_case "Glob shows pattern/path" Glob '{"pattern":"**/*.md","path":"docs"}' "pattern=**/*.md path=docs"
+summ_case "Agent shows type and description" Agent '{"subagent_type":"reviewer","description":"review diff","prompt":"p"}' "reviewer | review diff"
+summ_case "AskUserQuestion joins headers" AskUserQuestion '{"questions":[{"header":"Scope","question":"a?"},{"header":"Push","question":"b?"}]}' "Scope, Push"
+summ_case "AskUserQuestion without questions" AskUserQuestion '{}' ""
+summ_case "ToolSearch shows query" ToolSearch '{"query":"select:Monitor","max_results":1}' "select:Monitor"
+summ_case "Unknown tool falls back to input JSON" TodoWrite '{"todos":[]}' '{"todos":[]}'
+summ_case "Bash multi-line command is flattened" Bash '{"command":"echo a\necho b"}' "echo a echo b"
+summ_case "Summary truncated to 240 chars" Bash "{\"command\":\"$(printf 'x%.0s' $(seq 300))\"}" "$(printf 'x%.0s' $(seq 240))"
+
+# --- 19. help and unknown option ----------------------------------------------
+run -h
+expect_rc "-h exits 0" 0
+expect_eq "-h prints usage" "usage: session-tools.sh <session.jsonl> [--thread <label>] [--cut <ISO-8601-Z>] [--subagents <dir>] [--summary]"
+run "$R/ok.jsonl" --bogus
+expect_rc "unknown option exits nonzero" 1
+if grep -qF -- "unknown option '--bogus'" <<< "$OUT"; then
+  PASS=$((PASS + 1))
+else
+  FAIL=$((FAIL + 1))
+  echo "FAIL: unknown option is named  [out: ${OUT:0:200}]"
+fi
 
 # --- summary -----------------------------------------------------------------
 echo "results: $PASS passed, $FAIL failed"

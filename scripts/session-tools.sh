@@ -121,7 +121,7 @@ def summ($n; $i):
   elif $n == "Grep" then "pattern=\($i.pattern // "") path=\($i.path // "") glob=\($i.glob // "")"
   elif $n == "Glob" then "pattern=\($i.pattern // "") path=\($i.path // "")"
   elif $n == "Agent" then "\($i.subagent_type // "") | \($i.description // "")"
-  elif $n == "AskUserQuestion" then ($i.questions | map(.header) | join(", "))
+  elif $n == "AskUserQuestion" then (($i.questions // []) | map(.header // "") | join(", "))
   elif $n == "ToolSearch" then ($i.query // "")
   else ($i | tostring) end;
 results as $res
