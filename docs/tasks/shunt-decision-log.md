@@ -26,6 +26,7 @@ Status: archived 2026-09-17. Branch `feat/shunt-decision-log`, single commit, no
 - Git Bash lacks shellcheck/bun/gitleaks and fails test-pre-commit + test-review-checklist on HEAD; WSL has every gate tool -> run gate-keeper in WSL from the start.
 - Implementers tried installing missing tools unprompted (choco failed, pip shellcheck-py succeeded): state "do not install tools" in delegation prompts.
 - SendMessage disabled: delta re-reviews need a fresh self-contained reviewer.
+- After `/clear`, the session transcript is the newest `~/.claude/projects/<proj>/*.jsonl`, not the id in the task temp dir; `session-tools.sh --cut` keeps records before the instant (no "since").
 
 ## Report
 
@@ -41,10 +42,12 @@ Subagents:
 - gate-keeper (WSL) | 17231 | 13 | 132s | 0 | 0 | 1 | RED — SC2028 test-shunt-report.sh:73
 - gate-keeper (WSL) | 16584 | 13 | 122s | 0 | 0 | 0 | GREEN (all keys, no skips)
 
-Orchestrator cost (`session-tools.sh --summary`, whole session file incl. pre-task PR #9 merge; `--cut` had no effect): main 221 turns, 191.5k output, 15.44M cache reads, 16.47M billed volume.
+Orchestrator cost (`session-tools.sh --summary`, session 7e1907d4): main 106 turns, 91.7k output, 8.36M cache reads, 8.64M billed volume.
 
 | thread | calls | errors | flags | tools |
 |---|---|---|---|---|
-| main | 115 | 1 | 14 | Bash 42, Edit 35, Agent 11, Read 9, Grep 8, Write 6, Skill 2, Glob 1, ToolSearch 1 |
-| gate-keeper | 47 | 4 | 1 | Bash 34, Read 7 |
-| reviewer | 35 | 0 | 4 | Read 16, Bash 11, Grep 3 |
+| main | 56 | 2 | 4 | Bash 20, Edit 12, Agent 9, AskUserQuestion 4, Grep 4, Read 3, Write 2, Skill 1, SendMessage 1 |
+| implementer (x3) | 135 | 13 | 5 | Bash 87, Read 21, Edit 19, Write 4, Grep 1 |
+| gate-keeper (x3) | 46 | 1 | 1 | Bash 36, Read 7 |
+| reviewer (x2) | 19 | 0 | 2 | Read 10, Bash 7 |
+| spec-critic | 10 | 0 | 0 | Grep 5, Read 4 |
