@@ -52,3 +52,9 @@ Subagents:
 - reviewer (FLAG fix) | 43694 | 9 | 189s | 0 | 1 | 0 | APPROVE (minor/nits deferred)
 - gate-keeper (WSL, follow-ups) | 13440 | 5 | 80s | 0 | 0 | 0 | GREEN
 - reviewer (follow-ups) | 34673 | 7 | 104s | 0 | 1 | 0 | APPROVE (minor: test 19 reuses test 4 fixture, as test 16 does)
+- gate-keeper (md trim) | 13791 | 5 | 82s | 0 | 0 | 0 | GREEN
+- reviewer (md trim) | 32329 | 8 | 97s | 0 | 1 | 0 | REQUEST_CHANGES (shunt rule dropped)
+- gate-keeper (md trim fix) | 13842 | 5 | 81s | 0 | 0 | 0 | GREEN
+- reviewer (md trim, delta) | 17789 | 3 | 18s | 0 | 2 | 0 | APPROVE
+
+Token trim: agents + SKILL.md −1.9 KB vs 6714f2d (justifications, triple "review fixes TDD" rule).
