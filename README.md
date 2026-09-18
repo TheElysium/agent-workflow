@@ -1,148 +1,195 @@
 # agent-workflow
 
-Versioned, copy-paste kit for the multi-agent development workflow with **opencode** and **Claude Code**.
+Versioned kit for a multi-agent development workflow with **Claude Code** (opencode
+optional): task routing, agent roster, token-shunt hook, enforceable gates, installer.
 
-## Structure
-
+```bash
+bash /path/to/agent-workflow/scripts/setup-workflow.sh --mode project --target . --dry-run
 ```
-AGENTS.md                    ← single source of truth: shunt pattern + task routing (T0/T1/T2)
-                               only. Always loaded (~600 tokens). opencode reads this from the
-                               project root. T1/T2 work points to the dev-workflow skill below.
 
-CLAUDE.md                    ← one line: @AGENTS.md (Claude Code import syntax)
+## Why
 
-.claude/                     ← copy into the project root
-├── settings.json            ← structural keys only (permissions, hooks, statusLine)
-├── settings.local.json      ← created locally, gitignored; not part of the kit copy
-├── statusline-command.sh    ← referenced by settings.json
-├── hooks/shunt.sh           ← PreToolUse shunt hook + hooks/test-shunt.sh
-├── agents/                  ← implementer, reviewer, gate-keeper, explore, bulk-reader, code-writer, spec-critic
-└── skills/dev-workflow/     ← 5-phase workflow + multi-agent rules, loaded on demand for T1/T2
+- **Route before working.** A typo must not pay for a spec, a critic and two gate runs.
+- **Load rules on demand.** `AGENTS.md` ~600 tokens, always on. The five phases ~4500,
+  only when routed T1/T2.
+- **Cheap models read, the expensive one decides.** The shunt hook redirects large reads
+  to subagents; reasoning stays on the primary model.
+- **Two gates.** `.gates.yml` proves the code runs; the reviewer proves it does what was
+  asked. Green tests on the wrong feature is a failed task.
+- **Evidence before code.** Every brief names its proof form (TDD, suite green, manual QA).
+- **Gates are data, not prompts.** `.gates.yml` runs verbatim in CI and under an agent
+  that never interprets results.
 
-.opencode/                   ← copy into the project root
-├── agent/                   ← build, implementer, reviewer, gate-keeper, explore, bulk-reader, code-writer, spec-critic
-└── plugins/shunt.ts         ← shunt plugin
+## Workflow
 
-.gates.yml                   ← lint / typecheck / build / test / sast / format commands
-.github/workflows/ci.yml     ← optional CI: runs the gates by executing .gates.yml via scripts/run-gates.sh
+```mermaid
+flowchart TD
+    Task([Task]) --> Route{"Route:<br/>files? risk? API? architecture?"}
 
-githooks/                    ← this repo's self-gate only (pre-commit + tests), not shipped to projects
-README.md
-LICENSE
+    Route -->|"T0 - one file, low risk"| Direct["Act directly"]
+    Route -->|"T1 - 2-3 files, tests exist"| Load
+    Route -->|"T2 - architecture, auth, DB,<br/>API, security, or 3+ files"| Load
+
+    Load[["dev-workflow skill<br/>(loaded on demand)"]] --> Spec
+
+    Spec["Phase 1 - restate the spec"] --> Critic{{"spec-critic"}}
+    Critic -->|NEEDS_CLARIFICATION| Interview["Interview the user"]
+    Interview --> Spec
+    Critic -->|STRUCTURED| Discover{{"explore / bulk-reader"}}
+
+    Discover --> Plan["Phase 2 - vertical slices, HITL or AFK"]
+    Plan --> Impl{{"implementer<br/>(evidence-first, parallel)"}}
+
+    Impl --> Eng{{"gate-keeper<br/>.gates.yml verbatim"}}
+    Impl --> Intent{{"reviewer<br/>intent gate"}}
+
+    Eng -->|RED| Impl
+    Intent -->|REQUEST_CHANGES| Impl
+    Eng -->|green| Commit
+    Intent -->|APPROVE| Commit
+
+    Commit["Phase 5 - commit on the task branch<br/>(push only when asked)"] --> Done([Done])
+    Direct --> Done
 ```
+
+| Level | Trigger | Process |
+|---|---|---|
+| **T0** | 1 file, low risk, no API surface | act directly |
+| **T1** | 2-3 files, existing tests prove it | `dev-workflow` skill |
+| **T2** | architecture, auth, DB, API, security, or 3+ files with new behavior | `dev-workflow` skill |
+
+In doubt, route one level up. Routing lives in `AGENTS.md`, phases in
+`.claude/skills/dev-workflow/SKILL.md`.
 
 ## Install
 
-Two ways to deploy the kit — pick one per machine, they aren't mutually exclusive with other projects running the other mode.
+| You use | Flag | Installed |
+|---|---|---|
+| Claude Code only | `--harness claude` (default) | `.claude/` |
+| opencode only | `--harness opencode` | `.opencode/` |
+| Both | `--harness both` | both |
 
-### Per-project
-
-Isolated, versioned with the project; safe default when different projects need different agent tuning or workflow revisions.
-
-```bash
-cp -r AGENTS.md CLAUDE.md .gates.yml .claude .opencode /path/to/project/
-cd /path/to/project
-```
-
-### Global (one copy, every session, any project)
-
-Symlinks need admin on Windows (tested twice: PowerShell `New-Item -ItemType SymbolicLink` and Git Bash `ln -s` with `MSYS=winsymlinks:nativestrict` both fail without elevation; plain `ln -s` silently falls back to a copy, not a link). Until that trade-off is settled, plain shims — no elevation needed:
+### Project mode
 
 ```bash
-REPO=/path/to/agent-workflow   # this repo, cloned once
-
-# AGENTS.md: one-line native import
-mkdir -p ~/.claude
-echo "@$REPO/AGENTS.md" > ~/.claude/AGENTS.md
-
-# shunt.sh: one-line exec shim (hooks run as scripts, @import doesn't apply)
-mkdir -p ~/.claude/hooks
-cat > ~/.claude/hooks/shunt.sh <<EOF
-#!/usr/bin/env bash
-# Shim — source of truth is the agent-workflow repo. Do not edit this copy;
-# edit .claude/hooks/shunt.sh in the repo instead, this file just execs it.
-exec bash "$REPO/.claude/hooks/shunt.sh" "\$@"
-EOF
-chmod +x ~/.claude/hooks/shunt.sh
-
-# dev-workflow skill: one-line pointer shim (skills don't support @import either)
-mkdir -p ~/.claude/skills/dev-workflow
-cat > ~/.claude/skills/dev-workflow/SKILL.md <<EOF
----
-name: dev-workflow
-description: Multi-phase development workflow (spec, plan, implement, verify gates, git, multi-agent orchestration) for T1/T2 tasks — substantial features, refactors, or anything touching architecture, auth, DB, or a public API surface. Use when a task is routed T1 or T2 per AGENTS.md task-routing criteria, or when the user asks to "follow the workflow" / "orchestrate this".
----
-
-Shim — source of truth is the agent-workflow repo. Do not edit this copy;
-edit .claude/skills/dev-workflow/SKILL.md in the repo instead.
-
-Read and follow exactly:
-$REPO/.claude/skills/dev-workflow/SKILL.md
-EOF
-
-# agent roster: no pointer mechanism available — plain synced copies
-mkdir -p ~/.claude/agents
-cp "$REPO"/.claude/agents/*.md ~/.claude/agents/
+KIT=/path/to/agent-workflow
+bash "$KIT/scripts/setup-workflow.sh" --mode project --target DIR --stack rust --dry-run
+bash "$KIT/scripts/setup-workflow.sh" --mode project --target DIR --stack rust
+bash "$KIT/scripts/setup-workflow.sh" --verify --target DIR
 ```
 
-Re-run the last `cp` whenever `.claude/agents/*.md` changes in the repo — nothing detects drift automatically:
+`--stack`: `shell` `node` `bun` `python` `rust` `other` - picks the `.gates.yml`
+skeleton. An existing `.gates.yml` is never overwritten.
+
+### Global mode
+
+Claude Code only; opencode reads `~/.config/opencode/`, unsupported.
 
 ```bash
-diff -rq ~/.claude/agents "$REPO/.claude/agents"
+bash "$KIT/scripts/setup-workflow.sh" --mode global      # override root with --global-dir
 ```
 
-Restart any running Claude Code session after first-time setup — it only detects a new `~/.claude/agents/` directory at session start.
+Writes `~/.claude/` shims: `@import` for `AGENTS.md`, `exec` shims for hooks and
+statusline, pointer shims for skills, plain copies of the agents (no pointer mechanism -
+re-run when `.claude/agents/*.md` changes). `settings.json` is merged key-wise with `jq`.
+Restart running sessions after a first install: `~/.claude/agents/` is detected at start.
 
-This repo itself uses its own kit (auto-dogfooding), in global mode. Beyond the kit it carries `githooks/` and `.gates.yml` for its own self-gate (wired with `git config core.hooksPath githooks` here only); projects may mirror the gate pattern with their own `.gates.yml` + pre-commit, but they are not part of the copy.
+Symlinks would be cleaner but need admin on Windows (`New-Item -ItemType SymbolicLink`
+and `ln -s` with `MSYS=winsymlinks:nativestrict` both fail unelevated; plain `ln -s`
+silently copies). Shims need no elevation.
 
-## Workflow (summary)
+`/setup-workflow` runs the same script after interviewing for harness, mode and stack.
 
-Task routing: T0 direct → T1 lightweight → T2 orchestrated (criteria: files touched, risk, API surface, architectural impact). Routing itself lives in `AGENTS.md`, always loaded. T0 acts directly, no ceremony; T1/T2 invoke the `dev-workflow` skill (`.claude/skills/dev-workflow/SKILL.md`), which is only pulled into context when a task actually needs it — this is what keeps the always-loaded `AGENTS.md` down to ~600 tokens instead of the ~4500 the full phase-by-phase process would cost every session.
+### Re-runs
 
-T2 flow (inside the skill): spec (→ spec-critic on non-trivial specs) → decomposition → explore/bulk-reader (parallel) → implementer (evidence-first: TDD for behavior changes, suite green + typecheck for mechanical changes) → gate-keeper (lint/typecheck/build/tests/SAST) → reviewer (peer review + intent gate) → commit → push only on explicit request. Two gates: engineering (`.gates.yml`) and intent (spec vs implementation).
+Manifest `.claude/agent-workflow.install.json` (kit commit + sha256 per file):
 
-`dev-workflow` and the agent roster (`.claude/agents/`, `.opencode/agent/`) can be deployed per-project or globally — see Install for the concrete steps and trade-offs of each.
+- hash matches -> updated silently; you edited it -> `SKIP (local changes)`
+- `--force` overwrites after a `<file>.bak.<epoch>`
+- `--uninstall` removes only unmodified kit files; a `settings.json` that predates the
+  install is unmerged (kit hooks and `statusLine` stripped, your keys kept), not deleted
+- `--verify` exits 2 on any broken path
 
-Details: see `AGENTS.md` (routing) and `.claude/skills/dev-workflow/SKILL.md` (phases).
+### Not done by the installer
 
-### Enforceable gates
+`bun install` (network-free by design: generates `.opencode/package.json` with a pinned
+`@opencode-ai/plugin`, prints the command), CI (`ci.yml` here is shell-stack only),
+pre-commit (`githooks/` enforces this repo's own policy), rewriting your `AGENTS.md`
+(kit rules go to `.claude/agent-workflow/AGENTS.md`, one `@` import line is appended).
 
-- Every project carries a `.gates.yml` at its root (format documented in the dev-workflow skill, Phase 4: `.claude/skills/dev-workflow/SKILL.md`): the single source of lint/typecheck/build/test/sast commands. `gate-keeper` runs it verbatim; a missing file is built with the user, never discovered by guesswork.
-- SAST is non-skippable (gitleaks + the stack's audit tool). A gate run without SAST is a red gate; in `githooks/pre-commit` a missing gate tool (shellcheck, gitleaks, jq) is itself a hard red — the commit is blocked until the tool is installed.
-- Enforcement is local-only by default: `@gate-keeper` blocks a task before it is done and before commit. The CI layer (`.github/workflows/ci.yml` running `.gates.yml` via `scripts/run-gates.sh`) is optional — only for projects whose CI you control.
-- Task state: long tasks persist their spec, decisions, todo and gate status in `docs/tasks/<slug>.md` (updated by the orchestrator; sessions read it before resuming).
-- This repo self-enforces: `githooks/pre-commit` (activate with `git config core.hooksPath githooks`) runs shellcheck, a secrets scan, an English/no-accents check, JSON validation, and the `CLAUDE.md == @AGENTS.md` check on every commit.
+**Trust boundary**: committed hooks mean every collaborator runs kit shell code on every
+`Read`/`Bash`. `.usage/shunt.jsonl` records full commands and paths - it is gitignored
+for that reason. Do not commit it.
+
+## Layout
+
+```
+AGENTS.md                  routing + shunt rules, always loaded. CLAUDE.md = one line @AGENTS.md
+.claude/settings.json      permissions, hooks, statusLine       settings.local.json  never installed
+.claude/hooks/             shunt.sh (PreToolUse), session-end.sh (usage import)
+.claude/agents/            implementer reviewer gate-keeper explore bulk-reader code-writer spec-critic
+.claude/skills/            dev-workflow, setup-workflow
+.opencode/agent/           same roster, opencode format (+ build)
+.opencode/plugins/         shunt.ts (parity with shunt.sh), usage-log.ts
+scripts/setup-workflow.sh  the installer
+scripts/run-gates.sh       executes .gates.yml (gate-keeper + CI)
+scripts/review-checklist.sh   per-file checklist fed to the reviewer
+scripts/{usage-report,usage-import-claude,session-tools,shunt-report}.sh   cost + telemetry
+scripts/test-*.sh          kit-only, never installed
+.gates.yml                 lint / typecheck / build / test / sast / format
+.github/ githooks/         this repo's own CI and self-gate, not installed
+```
+
+## Gates
+
+- `.gates.yml` at every project root is the single source of gate commands; `gate-keeper`
+  runs it verbatim. Missing file -> built with the user, never guessed.
+- A generated skeleton emits unfillable gates as hard reds
+  (`echo "gate not configured" >&2 && exit 1`). A green run proving nothing is worse than none.
+- SAST is non-skippable. A run without it is a red gate. Missing tool = FAIL, never skip.
+- Local-only by default; CI optional. Long tasks persist state in `docs/tasks/<slug>.md`.
+- This repo self-gates: `git config core.hooksPath githooks` (shellcheck, secrets, ASCII,
+  JSON, `CLAUDE.md == @AGENTS.md`).
 
 ## Per-project overrides
 
-To adapt an agent to a stack (e.g. Rust for a Tauri project), place a same-name/id file in the project:
-- Claude Code: `.claude/agents/<name>.md`
-- opencode: `.opencode/agent/<id>.md` (definitions merge: scalar fields replaced, permission rules appended)
-
-The kit definition is the base; the project file only adds stack specifics.
+Same-name file in the project: `.claude/agents/<name>.md` or `.opencode/agent/<id>.md`
+(opencode merges: scalars replaced, permission rules appended). Kit definition is the
+base; the project file adds stack specifics. The installer detects these by hash and
+skips them on re-run.
 
 ## Dependencies
 
 | Tool | Needed by | Notes |
-|------|-----------|-------|
-| Git for Windows (Git Bash) | Claude Code hooks | Hooks run via Git Bash; `bash.exe` at `C:\Windows\system32` is WSL bash, not Git Bash |
-| `jq` (Windows) | `.claude/hooks/shunt.sh` | `winget install jqlang.jq` — Git Bash inherits the Windows PATH. Without it the shunt hook fails open silently (no blocking), and the pre-commit JSON check blocks the commit (hard red) |
-| `jq` + `shellcheck` + `gitleaks` (Linux, `~/.local/bin`) | dev: gates + test harness | A missing gate tool blocks the pre-commit (hard red) — install all three before committing |
+|---|---|---|
+| Git Bash | Claude Code hooks | `bash.exe` in `C:\Windows\system32` is WSL bash, not Git Bash |
+| `jq` | shunt hook, settings merges, reports | `winget install jqlang.jq`. Missing -> shunt fails open silently |
+| `shellcheck`, `gitleaks` | gates, self-gate | missing gate tool = hard red |
+| `bun` | opencode plugins only | `bun install` in `.opencode/` |
 
-### Machine-specific paths
+Paths in `settings.json` are relative to the project root. Only machine-specific knob:
+`SHUNT_TEST_TMP` (fixture temp dir in `test-shunt.sh`, dev only).
 
-`settings.json` uses relative paths that resolve from the project root. Override points:
+## Cross-tool parity
 
-- `SHUNT_TEST_TMP` env var — replaces the fixture temp dir in `.claude/hooks/test-shunt.sh` (dev only)
+- **Shunt**: `shunt.ts` (opencode) and `shunt.sh` (Claude), same thresholds - 350 lines /
+  65536 bytes, tunable with `SHUNT_MIN_LINES` / `SHUNT_MAX_BYTES`. Divergences: exactly
+  350 lines passes on the Claude side (`wc -l`), blocked on the opencode side (counts the
+  trailing newline); `verb/foo.txt` with no trailing space is blocked opencode-side only.
+  Claude flags subagent calls with a top-level `agent_id`. Test: `bash .claude/hooks/test-shunt.sh`.
+- **Skills**: no opencode copy needed - it discovers `.claude/skills/*/SKILL.md` natively.
+- **Telemetry**: every shunt decision (allow and deny) appends one JSONL line to
+  `.usage/shunt.jsonl`. Schema: `ts` `harness` `session` `tool` `decision` `reason` `path`
+  `bytes` `lines` `threshold_bytes` `threshold_lines`, plus `command` (bash) or
+  `offset`/`limit` (read); records with no `decision` are legacy denies. One record per
+  file arg. Best-effort: a write failure never blocks the redirect. Aggregate with
+  `scripts/shunt-report.sh`. Never rotated - purge with `rm .usage/shunt.jsonl`.
+- **Accepted divergences**: `hidden`/`temperature` opencode-only; `effort` Claude-only, so
+  model tiers are set independently; detailed permissions opencode-only; `git push` ask is
+  a permission rule (Claude) vs a `permission` field (opencode).
 
-Everything else (agents, rules, hook logic, thresholds) is machine-agnostic.
+This repo runs its own kit in global mode.
 
-## Cross-tool sync notes
+## License
 
-- `AGENTS.md` (root) is the single canonical copy of the workflow rules. `CLAUDE.md` imports it via `@AGENTS.md`. The pre-commit hook blocks any commit where `CLAUDE.md` is not exactly one line `@AGENTS.md`.
-- **Shunt parity**: opencode enforces it via the `shunt.ts` plugin, Claude Code via the `shunt.sh` hook (same thresholds, 350 lines / 65536 bytes; tuned on either side with `SHUNT_MIN_LINES` / `SHUNT_MAX_BYTES`). Boundary detail: a file with exactly 350 lines passes on the Claude side (`wc -l`), while shunt.ts counts the trailing newline as a line and blocks it. Claude Code flags subagent calls with a top-level `agent_id`, which replaces the plugin's delegated-session tracking. Word-boundary detail: `verb/foo.txt` (no space after the verb) is blocked on the opencode side (`\b`) and passes on the Claude side (`([[:space:]]|$)`); both trigger on a following space or end-of-command. Test the hook with `bash .claude/hooks/test-shunt.sh` (exercises the WSL path fallback; the Git Bash/cygpath branch is exercised in production).
-- **Skill parity**: `.claude/skills/dev-workflow/SKILL.md` needs no opencode-specific copy — opencode natively discovers `.claude/skills/*/SKILL.md` in the project (and `~/.claude/skills/*/SKILL.md` globally), same frontmatter format as Claude Code.
-- **Shunt telemetry**: every Read/Bash shunt decision (allow AND deny, subagent calls included) appends one JSONL line to `.usage/shunt.jsonl` (harness-neutral schema: `ts`/`harness` (`claude`|`opencode`)/`session`/`tool` (`read`|`bash`)/`decision` (`allow`|`deny`; legacy records with no `decision` count as `deny`)/`reason` (deny: `bytes`|`lines`; allow: `subagent`|`no_input`|`targeted`|`compound`|`verb`|`bounded`|`under_threshold`|`missing`)/`path` (string or null)/`bytes`/`lines`/`threshold_bytes`/`threshold_lines`, plus `command` for `tool: "bash"` and `offset`/`limit` for `tool: "read"`; a multi-file bash command writes one record per file arg, sharing `ts`/`session`/`command`). Logging is best-effort on both sides — a write failure never blocks the redirect. Aggregate with `scripts/shunt-report.sh` (`--file`/`--since`/`--session`, same conventions as `scripts/usage-report.sh`): totals (records/allowed/blocked), breakdown by decision/reason, harness, tool, top blocked files, top allowed commands. The sink is never rotated and grows with every tool call: purge it with `rm .usage/shunt.jsonl`.
-- Accepted divergences: `hidden`/`temperature` agent fields are opencode only; the `effort` agent field is Claude Code only (opencode tunes with `temperature`), so per-agent model tiers are set independently on each side; detailed permissions (Task, bash patterns) opencode only; `git push` ask = permission rule on the Claude Code side, `permission` field on the opencode side.
-- `.claude/settings.json` is versioned without secrets (credentials live in `.claude/settings.local.json`, never committed).
-- `.opencode/settings.local.json` is also machine-local and never committed.
+MIT - see `LICENSE`.
