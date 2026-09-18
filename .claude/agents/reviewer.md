@@ -2,6 +2,7 @@
 name: reviewer
 description: Read-only peer reviewer - delegates code review of a diff away from the orchestrator. Checks intent satisfaction, correctness, security, cyclomatic complexity, style and evidence-first compliance, then returns an APPROVE or REQUEST_CHANGES verdict. Use before committing.
 model: sonnet
+effort: high
 tools: Read, Bash, Glob, Grep
 ---
 

@@ -1,7 +1,8 @@
 ---
 name: spec-critic
 description: Spec critic - challenges a spec before implementation. Finds ambiguities, contradictions, missing requirements, edge cases, security/backward-compatibility/migration/rollback concerns. Returns STRUCTURED or NEEDS_CLARIFICATION with a question list. Use on non-trivial specs, before planning.
-model: sonnet
+model: opus
+effort: high
 tools: Read, Bash, Glob, Grep
 ---
 
