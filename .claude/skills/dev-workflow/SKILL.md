@@ -47,6 +47,7 @@ Multi-phase workflow. The main session is the default orchestrator.
 | Prototype / throwaway | Proof form declared explicitly in the spec |
 | Review fixes | Edit the test first, watch it fail, then fix (TDD again) |
 
+- Every `implementer` brief names the proof form from the table; a brief without one is an orchestrator defect.
 - The orchestrator edits code with Edit/Write. Shell edits (`sed -i`, `awk`, Python splices) only for one-line mechanical changes (rename, single-token substitution); never route around the shunt hook.
 - Lint: follow the project's configured linter; if none, apply a strict default for the stack (e.g. `clippy -D warnings`, `ruff --strict`, `eslint` strict) and tell the user.
 - Cyclomatic complexity: target ≤ 10 per function. Above the threshold → refactor or explicitly justify.
@@ -115,7 +116,7 @@ format: cargo fmt --check        # optional
 - `spec-critic` — challenges the spec before planning; on non-trivial specs (T1 with new behavior, T2).
 - `implementer` — substantial coding; proof form per Phase 3 evidence table; parallelize on independent tasks.
 - `gate-keeper` — verification commands only; after every implementation.
-- `reviewer` — read-only peer review of the diff; carries the intent gate (dimension 1) and catches cross-layer inconsistency no gate can catch. Commit only after APPROVE + green gates.
+- `reviewer` — read-only peer review of the diff; carries the intent gate (dimension 1) and catches cross-layer inconsistency no gate can catch. Commit only after APPROVE + green gates. Escalate it one model tier (per-invocation `model` override) when the slice meets T2 criteria — every shard when the review is split.
 - `explore`, `bulk-reader` — phase 1 exploration.
 - `code-writer` — test scaffolding and repetitive code matching existing patterns.
 - Re-review loop: after REQUEST_CHANGES, fix everything, then send the corrected diff back to the same reviewer (resume the session when possible). A commit requires a final APPROVE on the latest diff; gates stay green between rounds.
