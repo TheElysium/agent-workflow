@@ -11,7 +11,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test"
 import { mkdtempSync, readFileSync, existsSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { UsageLog } from "../.opencode/plugins/usage-log"
+import { UsageLog, usageTelemetryOff } from "../.opencode/plugins/usage-log"
 
 let dir: string
 
@@ -147,5 +147,45 @@ describe("usage-log plugin", () => {
     }
     const plugin = await UsageLog(ctx as any) // must not throw
     await plugin.event({ event: msgEvent("msg1", "ses1", { input: 5, output: 1 }) } as any) // and not throw
+  })
+})
+
+describe("usage-log telemetry opt-out", () => {
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "usage-log-test."))
+  })
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+    delete process.env.USAGE_TELEMETRY
+  })
+
+  for (const v of ["0", "false", "off"]) {
+    test(`USAGE_TELEMETRY=${v} writes nothing and creates no sink dir`, async () => {
+      process.env.USAGE_TELEMETRY = v
+      const plugin = await UsageLog(mockCtx() as any)
+      await plugin.event({ event: msgEvent("msg1", "ses1", { input: 100, output: 50 }) } as any)
+      expect(existsSync(join(dir, ".usage"))).toBe(false)
+    })
+  }
+
+  test("opting out mid-session stops the appends", async () => {
+    const plugin = await UsageLog(mockCtx() as any)
+    await plugin.event({ event: msgEvent("msg1", "ses1", { input: 1, output: 1 }) } as any)
+    process.env.USAGE_TELEMETRY = "off"
+    await plugin.event({ event: msgEvent("msg2", "ses1", { input: 1, output: 1 }) } as any)
+    expect(readFileSync(sinkPath(), "utf8").trim().split("\n").filter(Boolean).length).toBe(1)
+  })
+
+  test("usageTelemetryOff only accepts the documented spellings", () => {
+    delete process.env.USAGE_TELEMETRY
+    expect(usageTelemetryOff()).toBe(false)
+    for (const v of ["1", "no", ""]) {
+      process.env.USAGE_TELEMETRY = v
+      expect(usageTelemetryOff()).toBe(false)
+    }
+    for (const v of ["0", "false", "off"]) {
+      process.env.USAGE_TELEMETRY = v
+      expect(usageTelemetryOff()).toBe(true)
+    }
   })
 })

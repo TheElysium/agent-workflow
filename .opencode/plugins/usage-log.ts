@@ -14,12 +14,23 @@ import { appendFile as appendFileAsync } from "node:fs/promises"
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 
+// Telemetry is on unless explicitly switched off. USAGE_TELEMETRY is separate
+// from SHUNT_TELEMETRY on purpose: this sink holds only token counts, while
+// the shunt sink records commands and paths.
+export function usageTelemetryOff(): boolean {
+  const v = process.env.USAGE_TELEMETRY
+  return v === "0" || v === "false" || v === "off"
+}
+
 export const UsageLog: Plugin = async ({ client, worktree }) => {
   const sinkDir = join(worktree ?? ".", ".usage")
-  try {
-    mkdirSync(sinkDir, { recursive: true })
-  } catch {
-    // instrumentation must never break the harness init
+  // Opting out must leave no trace: no sink directory either.
+  if (!usageTelemetryOff()) {
+    try {
+      mkdirSync(sinkDir, { recursive: true })
+    } catch {
+      // instrumentation must never break the harness init
+    }
   }
   const sinkPath = join(sinkDir, "usage.jsonl")
 
@@ -43,6 +54,7 @@ export const UsageLog: Plugin = async ({ client, worktree }) => {
   return {
     event: async ({ event }: any) => {
       try {
+        if (usageTelemetryOff()) return
         if (event.type !== "message.updated") return
         const info = event.properties?.info
         if (!info || info.role !== "assistant") return

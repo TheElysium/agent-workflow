@@ -10,7 +10,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test"
 import { mkdtempSync, writeFileSync, existsSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { ShuntPlugin } from "./shunt"
+import { ShuntPlugin, CMD_MAX_CHARS, REC_MAX_BYTES, fitRecord, telemetryOff } from "./shunt"
 
 let dir: string
 
@@ -786,5 +786,107 @@ describe("shunt plugin bash blocking", () => {
     expect(recs[0].path).toBe(smallPath)
     expect(recs[1].decision).toBe("deny")
     expect(recs[1].path).toBe(bigPath)
+  })
+})
+
+describe("shunt plugin command cap", () => {
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "shunt-test."))
+  })
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("long command is truncated so the record stays inside one write()", async () => {
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    await callBash(plugin, "ses-cap", "echo " + "y".repeat(9000))
+
+    const recs = readRecords()
+    expect(recs.length).toBe(1)
+    expect(recs[0].command.endsWith("...[truncated]")).toBe(true)
+    expect(recs[0].command.length).toBe(CMD_MAX_CHARS + "...[truncated]".length)
+    expect(REC_MAX_BYTES).toBeLessThan(1024)
+    // 1024 is the MSYS stdio buffer the bash adapter must not cross; the TS
+    // adapter holds the same bound so both sinks stay interchangeable.
+    const line = readFileSync(sinkPath(), "utf8").trim()
+    expect(Buffer.byteLength(line) + 1).toBeLessThanOrEqual(1024)
+  })
+
+  test("command under the cap is logged verbatim", async () => {
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    await callBash(plugin, "ses-cap", "git status --short")
+    expect(readRecords()[0].command).toBe("git status --short")
+  })
+
+  test("a command at the character cap is not marked as truncated", () => {
+    const rec: Record<string, unknown> = { ts: "x" }
+    fitRecord(rec, "z".repeat(CMD_MAX_CHARS))
+    expect(rec.command).toBe("z".repeat(CMD_MAX_CHARS))
+    fitRecord(rec, "z".repeat(CMD_MAX_CHARS + 1))
+    expect(rec.command).toBe("z".repeat(CMD_MAX_CHARS) + "...[truncated]")
+  })
+
+  // A character cap alone is not a byte bound: one character encodes to up to
+  // 4 UTF-8 bytes, or 6 once escaped, which is how a 500-char cap still
+  // produced a 3224-byte record and put the splice back within reach.
+  const ROBOT = String.fromCodePoint(0x1f916)
+  for (const [label, ch] of [
+    ["control chars", String.fromCodePoint(0x01)],
+    ["accented chars", String.fromCodePoint(0xe9)],
+    ["astral chars", ROBOT],
+  ] as const) {
+    test(`${label} still fit inside the byte bound`, async () => {
+      const plugin = await ShuntPlugin(mockCtx() as any)
+      await callBash(plugin, "ses-cap", ch.repeat(600))
+      const line = readFileSync(sinkPath(), "utf8").trim()
+      expect(Buffer.byteLength(line) + 1).toBeLessThanOrEqual(1024)
+      expect(JSON.parse(line).command.endsWith("...[truncated]")).toBe(true)
+    })
+  }
+
+  test("a surrogate pair is never cut in half", async () => {
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    await callBash(plugin, "ses-cap", ROBOT.repeat(600))
+    const cmd = JSON.parse(readFileSync(sinkPath(), "utf8").trim()).command
+    const body = cmd.slice(0, cmd.length - "...[truncated]".length)
+    expect(body).toBe(ROBOT.repeat(Array.from(body).length))
+  })
+})
+
+describe("shunt plugin telemetry opt-out", () => {
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "shunt-test."))
+  })
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+    delete process.env.SHUNT_TELEMETRY
+  })
+
+  for (const v of ["0", "false", "off"]) {
+    test(`SHUNT_TELEMETRY=${v} writes no sink but keeps the deny`, async () => {
+      process.env.SHUNT_TELEMETRY = v
+      const filePath = join(dir, "big-lines.txt")
+      writeFileSync(filePath, "x\n".repeat(400))
+
+      const plugin = await ShuntPlugin(mockCtx() as any)
+      await expect(callRead(plugin, "ses1", filePath)).rejects.toThrow("BLOCKED by shunt")
+      expect(existsSync(sinkPath())).toBe(false)
+    })
+  }
+
+  test("an unset or unrelated value keeps telemetry on", async () => {
+    process.env.SHUNT_TELEMETRY = "1"
+    const plugin = await ShuntPlugin(mockCtx() as any)
+    await callBash(plugin, "ses1", "git status --short")
+    expect(readRecords().length).toBe(1)
+  })
+
+  test("telemetryOff only accepts the documented spellings", () => {
+    expect(telemetryOff(undefined)).toBe(false)
+    expect(telemetryOff("1")).toBe(false)
+    expect(telemetryOff("no")).toBe(false)
+    expect(telemetryOff("0")).toBe(true)
+    expect(telemetryOff("false")).toBe(true)
+    expect(telemetryOff("off")).toBe(true)
   })
 })

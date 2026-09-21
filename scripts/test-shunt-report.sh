@@ -138,6 +138,53 @@ mkdir -p "$R/.usage" && : > "$R/.usage/shunt.jsonl"
 run --bogus
 expect_rc "unknown arg exits nonzero" 1
 
+# --- 8. corrupt sink: unparsable lines are skipped, not fatal --------------------
+# The splice reproduces the real failure: a >1024-byte record cut at the MSYS
+# stdio boundary with another writer's record wedged into the gap.
+R="$(mktemp -d /tmp/shunt-report-test.XXXXXX)"
+mkdir -p "$R/.usage"
+LONG="$(printf 'x%.0s' $(seq 1 1200))"
+A='{"ts":"2026-09-20T10:00:00Z","harness":"claude","session":"s9","tool":"bash","decision":"allow","reason":"verb","path":null,"command":"'"$LONG"'","bytes":0,"lines":0}'
+B='{"ts":"2026-09-20T10:00:01Z","harness":"claude","session":"s9","tool":"read","decision":"deny","reason":"bytes","path":"b.json","bytes":99999,"lines":1}'
+{
+  echo '{"ts":"2026-09-20T09:00:00Z","harness":"claude","session":"s9","tool":"read","decision":"allow","reason":"targeted","path":"ok.txt","bytes":10,"lines":1}'
+  echo "${A:0:1024}$B"   # spliced: head of A + all of B
+  echo "${A:1024}"       # spliced: orphan tail of A
+  echo ''                # empty line
+  echo '   '             # whitespace only
+  echo '"a string"'      # valid JSON, not an object
+  echo '[1,2]'           # valid JSON, not an object
+  echo '{"ts":"2026-09-20T11:00:00Z","harness":"opencode","session":"s9","tool":"bash","decision":"deny","reason":"lines","path":"big.txt","bytes":1,"lines":900}'
+} > "$R/.usage/shunt.jsonl"
+run
+expect_rc "corrupt sink still exits 0" 0
+expect_has "corrupt sink keeps the parsable records" "records: 2"
+expect_has "corrupt sink keeps the allowed record" "allowed: 1"
+expect_has "corrupt sink keeps the blocked record" "blocked: 1"
+expect_has "corrupt sink counts every dropped line" "skipped: 6"
+
+# --- 9. clean sink still prints the counter -------------------------------------
+# "skipped: 0" is printed unconditionally: a counter that only appears on
+# failure turns a loud abort into silent data loss.
+R="$(mktemp -d /tmp/shunt-report-test.XXXXXX)"
+mkdir -p "$R/.usage"
+echo '{"ts":"2026-09-20T09:00:00Z","harness":"claude","session":"s9","tool":"read","decision":"allow","reason":"targeted","path":"ok.txt","bytes":10,"lines":1}' > "$R/.usage/shunt.jsonl"
+run
+expect_has "clean sink reports one record" "records: 1"
+expect_has "clean sink reports skipped: 0" "skipped: 0"
+
+# --- 10. sink with no trailing newline -----------------------------------------
+# An unterminated last line is still a record: printf-based appends can be cut
+# short by a crash. Counting lines with wc -l misses it and makes "skipped" go
+# negative.
+R="$(mktemp -d /tmp/shunt-report-test.XXXXXX)"
+mkdir -p "$R/.usage"
+printf '%s
+%s'   '{"ts":"2026-09-20T09:00:00Z","harness":"claude","session":"s9","tool":"read","decision":"allow","reason":"targeted","path":"ok.txt","bytes":10,"lines":1}'   '{"ts":"2026-09-20T09:00:01Z","harness":"claude","session":"s9","tool":"read","decision":"deny","reason":"bytes","path":"b.json","bytes":99999,"lines":1}'   > "$R/.usage/shunt.jsonl"
+run
+expect_has "unterminated last line is counted as a record" "records: 2"
+expect_has "unterminated last line keeps skipped at 0" "skipped: 0"
+
 # --- summary -----------------------------------------------------------------
 echo "PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" -eq 0 ]

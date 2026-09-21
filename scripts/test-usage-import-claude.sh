@@ -142,6 +142,22 @@ bash "$IMPORT" --dir "$R/nonexistent" --project Proj >/dev/null 2>&1 || RC_GOT=$
 expect_rc "missing transcript dir exits 1" 1
 rm -rf "$R"
 
+# --- USAGE_TELEMETRY opt-out ---------------------------------------------------
+# Opting out is a no-op exit, before any mkdir: no sink dir, no meta file.
+for v in 0 false off; do
+  R="$(mktemp -d /tmp/usage-import-test.XXXXXX)"
+  mkfixtures "$R/projects"
+  RC_GOT=0
+  USAGE_TELEMETRY="$v" bash "$IMPORT" --dir "$R/projects" --project Proj --out "$(sink)" >/dev/null 2>&1 || RC_GOT=$?
+  expect_rc "USAGE_TELEMETRY=$v exits 0" 0
+  if [ -e "$R/.usage" ]; then
+    FAIL=$((FAIL + 1)); echo "FAIL: USAGE_TELEMETRY=$v still created the sink dir"
+  else
+    PASS=$((PASS + 1))
+  fi
+  rm -rf "$R"
+done
+
 # --- summary -----------------------------------------------------------------
 echo "PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" -eq 0 ]

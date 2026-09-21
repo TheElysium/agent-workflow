@@ -24,9 +24,21 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-[ -f "$FILE" ] || { echo "usage-report.sh: no sink: $FILE" >&2; exit 1; }
+[ -f "$FILE" ] || {
+  echo "usage-report.sh: no sink: $FILE (telemetry off via USAGE_TELEMETRY?)" >&2
+  exit 1
+}
 
-raw="$(wc -l < "$FILE" | tr -d ' ')"
+# jq -s aborts on the first unparsable line. Keep only well-formed objects and
+# count what was dropped, so data loss stays visible. "raw" counts parseable
+# records so that "deduped from N" means duplicates, not corruption.
+CLEAN="$(mktemp)"
+trap 'rm -f "$CLEAN"' EXIT
+# awk, not wc -l: an unterminated last line is a record jq -R still reads - see
+# shunt-report.sh.
+total="$(awk 'END{print NR}' "$FILE")"
+jq -R -c 'fromjson? | select(type == "object")' "$FILE" > "$CLEAN" 2>/dev/null || true
+raw="$(awk 'END{print NR}' "$CLEAN")"
 
 jq -s -r --arg since "$SINCE" --arg sess "$SESSION" --argjson raw "$raw" '
   def tot(a): ([a[].tokens_in] | add // 0) as $i
@@ -49,4 +61,7 @@ jq -s -r --arg since "$SINCE" --arg sess "$SESSION" --argjson raw "$raw" '
     "unknown: \(tot($unk))",
     "by model:",
     (mod($pri + $sub + $unk))
-' "$FILE"
+' "$CLEAN"
+
+# Printed unconditionally, including "skipped: 0" - see shunt-report.sh.
+echo "skipped: $((total - raw))"

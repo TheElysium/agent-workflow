@@ -14,6 +14,8 @@
 #
 # Env:   SHUNT_MIN_LINES  line threshold   (default 350)
 #        SHUNT_MAX_BYTES  byte threshold    (default 65536)
+#        SHUNT_TELEMETRY  0/false/off disables the .usage/shunt.jsonl sink
+#                         (the redirect decision itself is unaffected)
 #
 # Note: relative paths resolve against the hook process's cwd, which Claude
 # Code sets to the project directory (same behavior as shunt.ts).
@@ -41,6 +43,23 @@ max_bytes() {
 # Hoisted once: every Read/Bash call pays for these, keep it cheap.
 MIN_LINES=$(min_lines)
 MAX_BYTES=$(max_bytes)
+
+# Caps on the logged "command" field. This is what keeps appends atomic: bash's
+# printf builtin writes through stdio, whose buffer is 1024 bytes under MSYS,
+# so a record above that leaves as several write() calls and a concurrent hook
+# process splices itself into the gap (observed at byte offset exactly 1024).
+# "command" is the only unbounded field -- a record without it peaks at 425
+# bytes -- so capping it keeps the whole record inside one write().
+#
+# Two caps, because the buffer is in bytes and JSON is not: one character can
+# encode to 4 UTF-8 bytes, or 6 once escaped as a backslash-u pair, so a
+# 500-character cap alone still yielded 3224-byte records. REC_MAX_BYTES is
+# the real guarantee; CMD_MAX_CHARS is the cheap first pass that ASCII
+# commands never exceed.
+# The 24-byte headroom below 1024 covers the "...[truncated]" marker, which is
+# appended after the fit.
+CMD_MAX_CHARS=500
+REC_MAX_BYTES=1000
 
 # Structured fields (+ the human-readable redirect message) for the last
 # check_file() block decision, consumed by log_shunt_block()/deny() at the
@@ -107,7 +126,11 @@ deny() { # $1 = reason text
 # offset/limit).
 log_event() { # log_event <tool:read|bash> <decision:allow|deny> <reason> <path|""> <bytes|""> <lines|"">
   local tool="$1" decision="$2" reason="$3" p="$4" bytes="$5" lines="$6" line
+  # Opt-out is checked before the jq fork, so disabling telemetry costs nothing.
+  case "${SHUNT_TELEMETRY:-1}" in 0|false|off) return 0 ;; esac
   line=$(printf '%s' "$input" | jq -b -c \
+    --argjson cmdmax "$CMD_MAX_CHARS" \
+    --argjson recmax "$REC_MAX_BYTES" \
     --arg tool "$tool" \
     --arg decision "$decision" \
     --arg reason "$reason" \
@@ -133,7 +156,18 @@ log_event() { # log_event <tool:read|bash> <decision:allow|deny> <reason> <path|
       then {command: (.tool_input.command // "")}
       else {offset: (.tool_input.offset // null), limit: (.tool_input.limit // null)}
       end
-    )' 2>/dev/null)
+    )
+    # Cap by characters first (free for ASCII), then shrink until the encoded
+    # record fits, then mark it. Quartering converges in a handful of steps and
+    # cannot loop: the length strictly drops and 0 is a stop condition.
+    | if has("command")
+      then .command as $orig
+        | .command = ($orig | .[:$cmdmax])
+        | until((tojson | utf8bytelength) <= $recmax or (.command | length) == 0;
+                .command |= .[: (length * 3 / 4 | floor)])
+        | if (.command | length) < ($orig | length)
+          then .command += "...[truncated]" else . end
+      else . end' 2>/dev/null)
   [ -n "$line" ] || return 0
   mkdir -p .usage 2>/dev/null || true
   { printf '%s\n' "$line" >> .usage/shunt.jsonl; } 2>/dev/null || true

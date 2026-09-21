@@ -87,6 +87,43 @@ R="$(mktemp -d /tmp/usage-report-test.XXXXXX)"
 run
 expect_rc "missing sink exits nonzero" 1
 
+# --- 6. corrupt sink: unparsable lines are skipped, not fatal -------------------
+# "deduped from N" counts parsable records, so it means duplicates; corruption
+# is reported separately by "skipped".
+R="$(mktemp -d /tmp/usage-report-test.XXXXXX)"
+mkdir -p "$R/.usage"
+{
+  echo '{"ts":"2026-09-14T10:00:00Z","harness":"claude","session":"s1","msg":"m1","role":"primary","model":"claude-opus-5","tokens_in":5,"tokens_out":6,"cache_read":0,"cache_write":0}'
+  echo '{"ts":"2026-09-14T10:00:01Z","harness":"claude","session":"s1","msg":"m1","role":"primary","model":"claude-opus-5","tokens_in":5,"tokens_out":9,"cache_read":0,"cache_write":0}'
+  echo '{"ts":"2026-09-14T10:00:02Z","harness":"claude","sessi'   # truncated write
+  echo 'on":"s1","msg":"m2"}'                                     # orphan tail
+  echo ''                                                          # empty line
+  echo '42'                                                        # valid JSON, not an object
+} > "$R/.usage/usage.jsonl"
+run
+expect_rc "corrupt sink still exits 0" 0
+expect_has "corrupt sink dedups the parsable records" "records: 1 (deduped from 2)"
+expect_has "corrupt sink keeps the last snapshot" "primary: 5 in / 9 out"
+expect_has "corrupt sink counts every dropped line" "skipped: 4"
+
+# --- 7. clean sink still prints the counter ------------------------------------
+R="$(mktemp -d /tmp/usage-report-test.XXXXXX)"
+mkdir -p "$R/.usage"
+echo '{"ts":"2026-09-14T10:00:00Z","harness":"claude","session":"s1","msg":"m1","role":"primary","model":"claude-opus-5","tokens_in":5,"tokens_out":6,"cache_read":0,"cache_write":0}' > "$R/.usage/usage.jsonl"
+run
+expect_has "clean sink reports skipped: 0" "skipped: 0"
+
+# --- 8. sink with no trailing newline ------------------------------------------
+# An unterminated last line is still a record; counting with wc -l misses it
+# and makes "skipped" go negative.
+R="$(mktemp -d /tmp/usage-report-test.XXXXXX)"
+mkdir -p "$R/.usage"
+printf '%s
+%s'   '{"ts":"2026-09-14T10:00:00Z","harness":"claude","session":"s1","msg":"m1","role":"primary","model":"claude-opus-5","tokens_in":5,"tokens_out":6,"cache_read":0,"cache_write":0}'   '{"ts":"2026-09-14T10:00:01Z","harness":"claude","session":"s1","msg":"m2","role":"primary","model":"claude-opus-5","tokens_in":1,"tokens_out":2,"cache_read":0,"cache_write":0}'   > "$R/.usage/usage.jsonl"
+run
+expect_has "unterminated last line is counted as a record" "records: 2 (deduped from 2)"
+expect_has "unterminated last line keeps skipped at 0" "skipped: 0"
+
 # --- summary -----------------------------------------------------------------
 echo "PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" -eq 0 ]

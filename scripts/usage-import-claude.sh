@@ -12,6 +12,8 @@
 # Usage: scripts/usage-import-claude.sh --dir ~/.claude/projects \
 #          --project <slug> [--out .usage/usage.jsonl]
 # Exit:  0 on success (empty import is valid), 1 on bad usage / no source.
+#
+# Env:   USAGE_TELEMETRY  0/false/off skips the import entirely.
 
 set -euo pipefail
 
@@ -27,6 +29,9 @@ while [ $# -gt 0 ]; do
     *) echo "usage-import-claude.sh: unknown arg '$1'" >&2; exit 1;;
   esac
 done
+
+# Opt-out runs before any mkdir: disabling telemetry must leave no sink behind.
+case "${USAGE_TELEMETRY:-1}" in 0|false|off) exit 0 ;; esac
 
 [ -n "$PROJECT" ] || { echo "usage-import-claude.sh: --project is required" >&2; exit 1; }
 SRC="$DIR/$PROJECT"

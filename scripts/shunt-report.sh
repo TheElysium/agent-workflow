@@ -40,7 +40,22 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-[ -f "$FILE" ] || { echo "shunt-report.sh: no sink: $FILE" >&2; exit 1; }
+[ -f "$FILE" ] || {
+  echo "shunt-report.sh: no sink: $FILE (telemetry off via SHUNT_TELEMETRY?)" >&2
+  exit 1
+}
+
+# jq -s aborts on the first unparsable line, which used to cost the whole
+# report for one spliced record. Keep only well-formed objects and count what
+# was dropped, so data loss stays visible instead of becoming silent.
+CLEAN="$(mktemp)"
+trap 'rm -f "$CLEAN"' EXIT
+# awk, not wc -l: wc counts newlines, so a sink whose last append was cut short
+# before its newline is undercounted while jq -R still reads that line, which
+# made "skipped" go negative.
+TOTAL="$(awk 'END{print NR}' "$FILE")"
+jq -b -R -c 'fromjson? | select(type == "object")' "$FILE" > "$CLEAN" 2>/dev/null || true
+KEPT="$(awk 'END{print NR}' "$CLEAN")"
 
 jq -b -s -r --arg since "$SINCE" --arg sess "$SESSION" '
   def breakdown(f): group_by(f) | map("  \(.[0]|f): \(length)") | .[];
@@ -77,4 +92,8 @@ jq -b -s -r --arg since "$SINCE" --arg sess "$SESSION" '
       | .[0:10]
       | map("  \(.count)x  \(.command | gsub("\n"; "\\n"))")
       | .[])
-' "$FILE"
+' "$CLEAN"
+
+# Printed unconditionally, including "skipped: 0": a counter that only shows up
+# on failure would turn a loud abort into silent data loss.
+echo "skipped: $((TOTAL - KEPT))"

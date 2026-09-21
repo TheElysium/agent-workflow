@@ -182,8 +182,17 @@ Paths in `settings.json` are relative to the project root. Only machine-specific
   `.usage/shunt.jsonl`. Schema: `ts` `harness` `session` `tool` `decision` `reason` `path`
   `bytes` `lines` `threshold_bytes` `threshold_lines`, plus `command` (bash) or
   `offset`/`limit` (read); records with no `decision` are legacy denies. One record per
-  file arg. Best-effort: a write failure never blocks the redirect. Aggregate with
-  `scripts/shunt-report.sh`. Never rotated - purge with `rm .usage/shunt.jsonl`.
+  file arg. `command` is capped (`...[truncated]`) so the encoded record stays under
+  1000 bytes and leaves in one `write()` - concurrent hooks otherwise splice into each
+  other at the 1024-byte MSYS stdio boundary. Two caps, since the boundary is in bytes
+  and JSON is not: 500 characters first (free for ASCII), then a shrink until the
+  encoded record fits. Best-effort: a write failure never blocks the redirect. Aggregate
+  with `scripts/shunt-report.sh`. Never rotated - purge with `rm .usage/shunt.jsonl`.
+- **Turning telemetry off**: `SHUNT_TELEMETRY=0` (decisions sink) and `USAGE_TELEMETRY=0`
+  (token sink) are independent - the first holds commands and paths, the second only
+  counts. Both accept `0`/`false`/`off`, leave no `.usage/` directory behind, and change
+  no shunt decision. Both reports skip unparsable lines and end with `skipped: N`
+  (printed even at `0`, so data loss stays visible).
 - **Accepted divergences**: `hidden`/`temperature` opencode-only; `effort` Claude-only, so
   model tiers are set independently; detailed permissions opencode-only; `git push` ask is
   a permission rule (Claude) vs a `permission` field (opencode).

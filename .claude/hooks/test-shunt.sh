@@ -477,6 +477,59 @@ else
   FAIL=$((FAIL + 1)); echo "FAIL: unwritable .usage sink breaks allow decision/output  [stderr: ${ALLOW_ERR:0:140}] [out: ${ALLOW_OUT:0:140}]"
 fi
 rm -f "$TDIR/.usage"
+# --- logged "command" is capped ------------------------------------------
+# The cap is what keeps a record inside one write(): bash's printf builtin
+# writes through stdio, whose buffer is 1024 bytes under MSYS, so a longer
+# record leaves as several write() calls and a concurrent hook splices into
+# the gap. Assert the boundary itself, not just the marker.
+rm -rf "$TDIR/.usage"
+LONG_CMD="echo $(printf 'y%.0s' $(seq 1 9000))"
+(cd "$TDIR" && printf '%s' "$(mkinput Bash "$(jq -nc --arg c "$LONG_CMD" '{command:$c}')")" | bash "$HOOK" >/dev/null 2>&1)
+if [ -s "$TDIR/.usage/shunt.jsonl" ]; then
+  REC="$(tail -n 1 "$TDIR/.usage/shunt.jsonl")"
+  REC_BYTES=$(printf '%s\n' "$REC" | wc -c)
+  if [ "$REC_BYTES" -le 1024 ]; then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1)); echo "FAIL: capped record exceeds the 1024-byte write boundary ($REC_BYTES)"
+  fi
+  case "$(jq -r '.command' <<< "$REC")" in
+    *"...[truncated]") PASS=$((PASS + 1)) ;;
+    *) FAIL=$((FAIL + 1)); echo "FAIL: long command not marked as truncated" ;;
+  esac
+else
+  FAIL=$((FAIL + 2)); echo "FAIL: no record logged for the long-command case"
+fi
+
+# A command under the cap is logged verbatim (no silent mangling).
+rm -rf "$TDIR/.usage"
+(cd "$TDIR" && printf '%s' "$(mkinput Bash '{"command":"git status --short"}')" | bash "$HOOK" >/dev/null 2>&1)
+if [ "$(jq -r '.command' < "$TDIR/.usage/shunt.jsonl" 2>/dev/null | tail -n 1)" = "git status --short" ]; then
+  PASS=$((PASS + 1))
+else
+  FAIL=$((FAIL + 1)); echo "FAIL: short command not logged verbatim"
+fi
+
+# --- SHUNT_TELEMETRY opt-out ---------------------------------------------
+# Opting out must leave no trace at all (not even an empty .usage dir) and
+# must not change the redirect decision.
+for v in 0 false off; do
+  rm -rf "$TDIR/.usage"
+  (cd "$TDIR" && printf '%s' "$(mkinput Read "{\"file_path\":\"$TDIR/big.txt\"}")" \
+    | SHUNT_TELEMETRY="$v" bash "$HOOK" >/dev/null 2>&1)
+  if [ -e "$TDIR/.usage" ]; then
+    FAIL=$((FAIL + 1)); echo "FAIL: SHUNT_TELEMETRY=$v still created the sink"
+  else
+    PASS=$((PASS + 1))
+  fi
+done
+
+# The deny decision and exit code survive the opt-out.
+expect "deny still fires with telemetry off" deny \
+  "$(mkinput Read "{\"file_path\":\"$TDIR/big.txt\"}")" SHUNT_TELEMETRY 0
+expect "allow still fires with telemetry off" pass \
+  "$(mkinput Read "{\"file_path\":\"$TDIR/small.txt\"}")" SHUNT_TELEMETRY 0
+rm -rf "$TDIR/.usage"
 
 echo
 echo "results: $PASS passed, $FAIL failed"

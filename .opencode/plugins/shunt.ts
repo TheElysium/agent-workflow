@@ -96,9 +96,42 @@ type LogFields = {
   limit?: unknown
 }
 
+// Caps on the logged "command" field, mirroring shunt.sh. "command" is the
+// only unbounded field, so capping it keeps a record inside a single write().
+// Two caps because the limit is in bytes and JSON is not: one character can
+// encode to 4 UTF-8 bytes, or 6 once escaped. CMD_MAX_CHARS is the cheap first
+// pass; REC_MAX_BYTES is the actual guarantee. Parity with the bash adapter
+// matters more than the exact values.
+export const CMD_MAX_CHARS = 500
+export const REC_MAX_BYTES = 1000
+const TRUNCATED = "...[truncated]"
+
+// Shrink rec.command until the encoded record fits, then mark it. Quartering
+// converges in a few steps and cannot loop: the length strictly drops.
+// Slicing goes through Array.from so a cut never splits a surrogate pair.
+export function fitRecord(rec: Record<string, unknown>, original: string): void {
+  let chars = Array.from(original).slice(0, CMD_MAX_CHARS)
+  rec.command = chars.join("")
+  while (
+    Buffer.byteLength(JSON.stringify(rec)) > REC_MAX_BYTES &&
+    chars.length > 0
+  ) {
+    chars = chars.slice(0, Math.floor((chars.length * 3) / 4))
+    rec.command = chars.join("")
+  }
+  if (chars.length < Array.from(original).length) rec.command += TRUNCATED
+}
+
+// Telemetry is on unless explicitly switched off. Shared spelling with the
+// bash adapters so one documented value works across both harnesses.
+export function telemetryOff(v: string | undefined): boolean {
+  return v === "0" || v === "false" || v === "off"
+}
+
 // Single sink writer for every decision (allow and deny). Best-effort: a
 // logging failure must never affect the decision already made by the caller.
 async function logDecision(sinkPath: string, fields: LogFields): Promise<void> {
+  if (telemetryOff(process.env.SHUNT_TELEMETRY)) return
   try {
     const rec: Record<string, unknown> = {
       ts: new Date().toISOString(),
@@ -113,7 +146,8 @@ async function logDecision(sinkPath: string, fields: LogFields): Promise<void> {
       threshold_bytes: maxBytes(),
       threshold_lines: fields.threshold,
     }
-    if (fields.tool === "bash") rec.command = fields.command ?? ""
+    // Last field set for bash records: fitRecord measures the whole record.
+    if (fields.tool === "bash") fitRecord(rec, fields.command ?? "")
     if (fields.tool === "read") {
       rec.offset = fields.offset ?? null
       rec.limit = fields.limit ?? null
