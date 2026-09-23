@@ -27,7 +27,7 @@ Multi-phase workflow. The main session is the default orchestrator.
 - HITL slices: split so every pure decision or mapping lives in a unit-tested module; only the irreducibly manual part (actor wiring, hardware-in-the-loop) sits outside TDD. Write the manual QA script (exact click path, expected state, expected state after undo/delete) before implementing, not after.
 - Order slices by dependency (blockers first).
 - For non-trivial or architectural changes, propose the approach and get agreement before coding.
-- Persist the plan: for tasks spanning multiple sessions, create `docs/tasks/<slug>.md` with the extracted spec, decisions, todo state, and gate status. Sessions read it before resuming. The status header (current slice, commit, next step) is updated in the same commit as the slice it describes — never as a follow-up edit.
+- Persist the plan: for tasks spanning multiple sessions, create `docs/tasks/<slug>.md` with the extracted spec, decisions, todo state, and gate status. The status header (current slice, commit, next step) is updated in the same commit as the slice it describes — never as a follow-up edit.
 - Memory is compressed, not accumulated. On task closure, compress `docs/tasks/<slug>.md` down to the durable outcome (final spec, decisions, retrospective lessons) and mark it archived; only open tasks stay as live plan files. Never grow an exhaustive journal — the file must shrink to knowledge at closure.
 - Log subagent metrics as a line in `docs/tasks/<slug>.md` at each subagent's completion — every subagent, every round, gate-keeper and re-review included. Format: `subagent | tokens | tool_uses | duration | retries | review_iterations | gate_failures | outcome`. Token counts come from the usage sink, not estimates: `scripts/usage-report.sh --since <task-start-ts>` aggregates `.usage/usage.jsonl` (fed by the opencode `usage-log` plugin and the Claude Code `SessionEnd` hook). Conversation compaction erases them; the plan file is the only durable record. These lines aggregate into cost per successful task (tokens spent per mergeable change) — not cost per agent.
 - One write per log update (one Edit or one Bash append).
@@ -95,6 +95,7 @@ format: cargo fmt --check        # optional
 - Conventional Commits (feat, fix, chore, docs, refactor, test) — short, present tense.
 - Committing without asking is allowed (on the task branch).
 - Re-run `gate-keeper` after any reviewer-driven fix, before commit. An orchestrator-side check is not a gate.
+- Slice end = checkpoint: commit + updated status header. Next slice in a new session: Read the header (`limit: 5`) + `git log --oneline -5`, then only the plan sections it needs (`offset`/`limit`), never the whole file. Long session (e.g. after a compaction) → recommend `/clear` before the next slice.
 - Push only when the user explicitly asks (a permission prompt will confirm). No force-push, no hook bypass, no secrets in commits.
 
 **Output format**: the commit message in strict Conventional Commits, one summary line plus short bullets when needed.
@@ -106,7 +107,7 @@ format: cargo fmt --check        # optional
 - Subagent outputs: structured bullets only, no file dumps.
 - After dispatching, end the turn; never poll with blocking `TaskOutput`.
 - Launch independent delegations in the same message. `gate-keeper` and `reviewer` are read-only: dispatch them in parallel after implementation (UI slices: reviewer after the design iterations).
-- Reviewer delegation: every reviewer prompt includes the output of `scripts/review-checklist.sh` (deterministic, per-file checklist) plus the spec/acceptance criteria; the reviewer must cover every listed file. Checklist > ~10 files → split into parallel `reviewer` runs, each with its own sub-checklist; aggregate verdicts (a single REQUEST_CHANGES blocks). LLM review never enters `.gates.yml` — gates stay reproducible.
+- Reviewer delegation: every reviewer prompt includes the output of `scripts/review-checklist.sh` (deterministic, per-file checklist) plus the spec/acceptance criteria. Checklist > ~10 files → split into parallel `reviewer` runs, each with its own sub-checklist; aggregate verdicts (a single REQUEST_CHANGES blocks). LLM review never enters `.gates.yml` — gates stay reproducible.
 - When splitting parallel `implementer` work, balance by estimated workload, not only file ownership — an uneven split keeps the critical path as long as the heaviest task.
 - Parallel hypothesis testing (optional, expensive): for major architectural decisions on HITL slices, explore 2–3 candidate designs via parallel `implementer` runs against throwaway branches, then evaluate and keep the best. Never use by default — the cost must be justified by the decision's irreversibility.
 - Keep agent definitions stable (favors prompt caching).
@@ -119,6 +120,6 @@ format: cargo fmt --check        # optional
 - `reviewer` — read-only peer review of the diff; carries the intent gate (dimension 1) and catches cross-layer inconsistency no gate can catch. Commit only after APPROVE + green gates. Escalate it one model tier (per-invocation `model` override) when the slice meets T2 criteria — every shard when the review is split.
 - `explore`, `bulk-reader` — phase 1 exploration.
 - `code-writer` — test scaffolding and repetitive code matching existing patterns.
-- Re-review loop: after REQUEST_CHANGES, fix everything, then send the corrected diff back to the same reviewer (resume the session when possible). A commit requires a final APPROVE on the latest diff; gates stay green between rounds.
+- Re-review loop: after REQUEST_CHANGES: any undisputed blocker/major, or undisputed findings across 2+ files → fresh `implementer` with them verbatim and proof form "Review fixes", the orchestrator keeping only the verdict and disputed findings; otherwise the orchestrator fixes (e.g. 2 nits in one file). Rebut each disputed finding in one line in the next round; the reviewer rules. Send the corrected diff back to the same reviewer (resume the session when possible).
 
 Flow for a substantial task: spec → decompose → explore (parallel) → implementer (TDD, parallel) → gate-keeper → reviewer → fix/re-review loop → commit (no push) → next todo.
