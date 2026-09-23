@@ -17,7 +17,7 @@ CLAUDE.md                    ← one line: @AGENTS.md (Claude Code import syntax
 ├── statusline-command.sh    ← referenced by settings.json
 ├── hooks/shunt.sh           ← PreToolUse shunt hook + hooks/test-shunt.sh
 ├── agents/                  ← implementer, reviewer, gate-keeper, explore, bulk-reader, code-writer, spec-critic
-└── skills/dev-workflow/     ← 5-phase workflow + multi-agent rules, loaded on demand for T1/T2
+└── skills/dev-workflow/     ← 5-phase workflow + multi-agent rules, loaded on demand for T1/T2; gates.md, ui.md, metrics.md read only when triggered
 
 .opencode/                   ← copy into the project root
 ├── agent/                   ← build, implementer, reviewer, gate-keeper, explore, bulk-reader, code-writer, spec-critic
@@ -78,6 +78,9 @@ edit .claude/skills/dev-workflow/SKILL.md in the repo instead.
 
 Read and follow exactly:
 $REPO/.claude/skills/dev-workflow/SKILL.md
+
+Its sibling files (gates.md, ui.md, metrics.md) sit next to that repo file,
+not next to this shim; read them from $REPO too, when their trigger applies.
 EOF
 
 # agent roster: no pointer mechanism available — plain synced copies
@@ -107,7 +110,7 @@ Details: see `AGENTS.md` (routing) and `.claude/skills/dev-workflow/SKILL.md` (p
 
 ### Enforceable gates
 
-- Every project carries a `.gates.yml` at its root (format documented in the dev-workflow skill, Phase 4: `.claude/skills/dev-workflow/SKILL.md`): the single source of lint/typecheck/build/test/sast commands. `gate-keeper` runs it verbatim; a missing file is built with the user, never discovered by guesswork.
+- Every project carries a `.gates.yml` at its root (format documented in `.claude/skills/dev-workflow/gates.md`): the single source of lint/typecheck/build/test/sast commands. `gate-keeper` runs it verbatim; a missing file is built with the user, never discovered by guesswork.
 - SAST is non-skippable (gitleaks + the stack's audit tool). A gate run without SAST is a red gate; in `githooks/pre-commit` a missing gate tool (shellcheck, gitleaks, jq) is itself a hard red — the commit is blocked until the tool is installed.
 - Enforcement is local-only by default: `@gate-keeper` blocks a task before it is done and before commit. The CI layer (`.github/workflows/ci.yml` running `.gates.yml` via `scripts/run-gates.sh`) is optional — only for projects whose CI you control.
 - Task state: long tasks persist their spec, decisions, todo and gate status in `docs/tasks/<slug>.md` (updated by the orchestrator; sessions read it before resuming).
