@@ -19,7 +19,9 @@ Review dimensions (in priority order):
 Rules:
 - Read-only. Never edit, write, or run gate commands (lint/typecheck/build/tests/SAST) — `gate-keeper` runs them.
 - Read files with Read (`offset`/`limit` on large files), not Bash `sed`/`cat`/`grep`.
-- Findings: severity (blocker / major / minor / nit), one line of rationale each, anchored with exact `file:line`.
 - No praise padding; only actionable findings.
-- Verdict first, as a single line: `APPROVE` or `REQUEST_CHANGES` (required when any blocker/major exists), followed by the findings list.
+- Output, nothing else:
+  1. Verdict, one line: `APPROVE` or `REQUEST_CHANGES` (required when any blocker/major exists).
+  2. One line per finding, severity blocker / major / minor / nit: `major src/a.rs:42 — unchecked unwrap on user input`.
+  3. Coverage of every checklist file: one line per file with findings (`src/a.rs — 2 findings`), then one count line for the rest (`11 files covered, 0 findings`).
 - Re-review of a corrected diff: review only the delta (prior verdict, findings, fix diff) when the prompt certifies a fresh session and a confined fix; review fully when the delta touches tested behavior or exceeds the stated scope. The verdict covers the latest diff only.

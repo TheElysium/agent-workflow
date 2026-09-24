@@ -109,6 +109,9 @@ edit .claude/skills/dev-workflow/SKILL.md in the repo instead.
 
 Read and follow exactly:
 $REPO/.claude/skills/dev-workflow/SKILL.md
+
+Its sibling files (gates.md, ui.md, metrics.md) sit next to that repo file,
+not next to this shim; read them from $REPO too, when their trigger applies.
 EOF
 
 # agent roster: no pointer mechanism available — plain synced copies
@@ -139,7 +142,7 @@ AGENTS.md                  routing + shunt rules, always loaded. CLAUDE.md = one
 .claude/statusline-command.sh  referenced by settings.json
 .claude/hooks/              shunt.sh (PreToolUse), session-end.sh (usage import)
 .claude/agents/             implementer reviewer gate-keeper explore bulk-reader code-writer spec-critic
-.claude/skills/dev-workflow/ 5-phase workflow + multi-agent rules, loaded on demand for T1/T2
+.claude/skills/dev-workflow/ 5-phase workflow + multi-agent rules, loaded on demand for T1/T2; gates.md, ui.md, metrics.md read only when triggered
 .opencode/agent/            same roster, opencode format (+ build)
 .opencode/plugins/          shunt.ts (parity with shunt.sh), usage-log.ts
 scripts/run-gates.sh        executes .gates.yml (gate-keeper + CI)
@@ -152,8 +155,9 @@ scripts/test-*.sh           kit-only tests, not shipped to projects
 
 ## Gates
 
-- `.gates.yml` at every project root is the single source of gate commands; `gate-keeper`
-  runs it verbatim. Missing file -> built with the user, never guessed.
+- `.gates.yml` at every project root is the single source of gate commands (format
+  documented in `.claude/skills/dev-workflow/gates.md`); `gate-keeper` runs it verbatim.
+  Missing file -> built with the user, never guessed.
 - A generated skeleton emits unfillable gates as hard reds
   (`echo "gate not configured" >&2 && exit 1`). A green run proving nothing is worse than none.
 - SAST is non-skippable. A run without it is a red gate. Missing tool = FAIL, never skip.
