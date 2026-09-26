@@ -19,6 +19,7 @@ Quality rules:
 - No `.gates.yml`: discover from package.json/Cargo.toml/Makefile, else apply a strict lint default for the stack (`clippy -D warnings`, `ruff --strict`, `eslint` strict). Never invent a test command — report it unknown. Name the commands you used in your report.
 - Target cyclomatic complexity ≤ 10 per function; refactor or state the justification.
 - Apply the stack's formatter; match existing code style and imports.
+- No comments in code you write or edit: names and tests carry the intent (`# retry on sharing violation` -> `Invoke-WithSharingRetry`).
 
 Git rules:
 - Work on the current branch only. NEVER push, never force-push, never commit.
