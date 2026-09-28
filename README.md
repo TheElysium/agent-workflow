@@ -146,6 +146,7 @@ AGENTS.md                  routing + shunt rules, always loaded. CLAUDE.md = one
 .claude/hooks/              shunt.ps1 (PreToolUse), session-end.ps1 (usage import), shunt.Tests.ps1
 .claude/agents/             implementer reviewer gate-keeper explore bulk-reader code-writer spec-critic
 .claude/skills/dev-workflow/ 5-phase workflow + multi-agent rules, loaded on demand for T1/T2; gates.md, ui.md, metrics.md read only when triggered
+.claude/stacks/<stack>.md   per-project stack traps, one line each, path passed to implementer + reviewer
 .opencode/                  unmaintained: roster, shunt.ts, usage-log.ts, bun tests; outside gates and CI
 scripts/run-gates.ps1       executes .gates.yml (gate-keeper + CI)
 scripts/review-checklist.ps1 per-file checklist fed to the reviewer
@@ -200,6 +201,10 @@ Paths in `settings.json` are relative to the project root.
   `offset`/`limit` (read); records with no `decision` are legacy denies. One record per
   file arg. Best-effort: a write failure never blocks the redirect. Aggregate with
   `scripts/shunt-report.ps1`. Never rotated - purge with `Remove-Item .usage/shunt.jsonl`.
+- **Usage**: SessionEnd imports main and subagent transcripts
+  (`<session>/subagents/agent-*.jsonl`) into `.usage/usage.jsonl`; unchanged files are skipped
+  by mtime. First run on a large history may exceed the 10 s hook timeout (progress is kept):
+  `pwsh -NoProfile -File scripts/usage-import-claude.ps1 --project <slug> --out .usage/usage.jsonl`.
 - **Accepted divergences**: `hidden`/`temperature` opencode-only; `effort` Claude-only, so
   model tiers are set independently; detailed permissions opencode-only; `git push` ask is
   a permission rule (Claude) vs a `permission` field (opencode).

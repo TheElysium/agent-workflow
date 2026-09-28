@@ -85,7 +85,9 @@ $cacheWrite = Get-TokenSum -Records $primary -Field 'cache_write'
 [Console]::Out.WriteLine("primary: $primaryIn in / $primaryOut out   (cache_read $cacheRead, cache_write $cacheWrite)")
 $subIn = Get-TokenSum -Records $subagent -Field 'tokens_in'
 $subOut = Get-TokenSum -Records $subagent -Field 'tokens_out'
-[Console]::Out.WriteLine("subagent: $subIn in / $subOut out")
+$subCacheRead = Get-TokenSum -Records $subagent -Field 'cache_read'
+$subCacheWrite = Get-TokenSum -Records $subagent -Field 'cache_write'
+[Console]::Out.WriteLine("subagent: $subIn in / $subOut out   (cache_read $subCacheRead, cache_write $subCacheWrite)")
 $unkIn = Get-TokenSum -Records $unknown -Field 'tokens_in'
 $unkOut = Get-TokenSum -Records $unknown -Field 'tokens_out'
 [Console]::Out.WriteLine("unknown: $unkIn in / $unkOut out")

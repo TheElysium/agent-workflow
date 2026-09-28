@@ -62,7 +62,9 @@ Multi-phase workflow. The main session is the default orchestrator. Files named 
 ## Multi-agent rules
 
 - Every delegation prompt is self-contained: extracted spec, exact task, `file:line` anchors, stack conventions, acceptance criteria, known environment constraints (toolchain gaps, OS quirks, host-dependent test hazards). Never rely on session context.
+- Project `.claude/stacks/<stack>.md` (stack = `.gates.yml` `stack:`) exists → its absolute path goes in every `implementer` and `reviewer` brief. Stack trap found by review or gates → one line appended to it in the slice commit.
 - After dispatching, end the turn; never poll with blocking `TaskOutput`.
+- Run killed by rate limit (429) → resume it via SendMessage to its agent ID. SendMessage unavailable → fresh run whose brief adds the partial work's `git diff` and "continue from this state".
 - Launch independent delegations in one message; `gate-keeper` and `reviewer` run in parallel after implementation.
 - Split parallel `implementer` work by estimated workload, not only file ownership.
 - Parallel hypothesis testing (2–3 `implementer` designs on throwaway branches): only for irreversible architectural decisions on HITL slices.
