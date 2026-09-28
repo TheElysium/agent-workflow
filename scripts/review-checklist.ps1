@@ -34,6 +34,9 @@ function Get-FileType {
     switch -CaseSensitive ($extension) {
         'sh' { return 'shell' }
         'bash' { return 'shell' }
+        'ps1' { return 'powershell' }
+        'psm1' { return 'powershell' }
+        'psd1' { return 'powershell' }
         'ts' { return 'typescript' }
         'js' { return 'javascript' }
         'mjs' { return 'javascript' }

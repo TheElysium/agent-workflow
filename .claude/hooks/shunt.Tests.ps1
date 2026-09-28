@@ -498,7 +498,7 @@ Describe 'shunt hook' {
             $record.limit | Should -Be 5
         }
 
-        It 'record field order matches the bash reference on the raw sink line' {
+        It 'record field order matches the contract on the raw sink line' {
             $dir = Get-ShuntFixtureDir
             $sink = Join-Path $dir '.usage/shunt.jsonl'
             Remove-Item -LiteralPath $sink -Force -ErrorAction SilentlyContinue
@@ -509,7 +509,7 @@ Describe 'shunt hook' {
             @($keys) | Should -Be @('ts', 'harness', 'session', 'tool', 'decision', 'reason', 'path', 'bytes', 'lines', 'threshold_bytes', 'threshold_lines', 'offset', 'limit')
         }
 
-        It 'Bash record field order matches the bash reference on the raw sink line (command last)' {
+        It 'Bash record field order matches the contract on the raw sink line (command last)' {
             $dir = Get-ShuntFixtureDir
             $sink = Join-Path $dir '.usage/shunt.jsonl'
             Remove-Item -LiteralPath $sink -Force -ErrorAction SilentlyContinue
