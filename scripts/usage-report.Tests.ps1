@@ -48,7 +48,7 @@ Describe 'usage-report subagent cache totals' {
         $subagentRecord = [ordered]@{
             ts          = '2026-01-01T00:00:01Z'
             harness     = 'claude'
-            session     = 'sess1/subagents/agent-abc'
+            session     = 'sess1'
             msg         = 'msg-subagent'
             role        = 'subagent'
             model       = 'claude-test'

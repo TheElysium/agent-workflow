@@ -69,7 +69,7 @@ function Write-MetaMap {
     $tempPath = "$MetaPath.tmp"
     $content = if ($lines.Count -gt 0) { ($lines -join "`n") + "`n" } else { '' }
     [IO.File]::WriteAllText($tempPath, $content, [Text.UTF8Encoding]::new($false))
-    Move-Item -LiteralPath $tempPath -Destination $MetaPath -Force
+    [IO.File]::Move($tempPath, $MetaPath, $true)
 }
 
 function Add-TextLineWithRetry {
@@ -275,7 +275,8 @@ $metaMap = Get-MetaMap -MetaPath $metaPath
 foreach ($key in $keys) {
     $item = $itemsByKey[$key]
     $filePath = $item.FilePath
-    $fileInfo = Get-Item -LiteralPath $filePath
+    $fileInfo = [IO.FileInfo]::new($filePath)
+    if (-not $fileInfo.Exists) { continue }
     $ticks = [string]$fileInfo.LastWriteTimeUtc.Ticks
 
     $entry = Get-MetaMapEntry -MetaMap $metaMap -Key $key
