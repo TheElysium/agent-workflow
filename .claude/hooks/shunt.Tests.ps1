@@ -54,13 +54,14 @@ BeforeAll {
         param(
             [Parameter(Mandatory)][string]$WorkingDirectory,
             [Parameter(Mandatory)][AllowEmptyString()][string]$InputJson,
-            [hashtable]$EnvVars
+            [hashtable]$EnvVars,
+            [string]$ScriptPath = $script:HookSource
         )
         $psi = [Diagnostics.ProcessStartInfo]::new()
         $psi.FileName = $script:PwshCmd
         $psi.ArgumentList.Add('-NoProfile')
         $psi.ArgumentList.Add('-File')
-        $psi.ArgumentList.Add($script:HookSource)
+        $psi.ArgumentList.Add($ScriptPath)
         $psi.WorkingDirectory = $WorkingDirectory
         $psi.RedirectStandardInput = $true
         $psi.RedirectStandardOutput = $true
@@ -682,6 +683,19 @@ Describe 'shunt hook' {
             $result = Invoke-ShuntHook -WorkingDirectory $dir -InputJson $inputJson
             $result.StdErr | Should -BeNullOrEmpty
             $result.StdOut | Should -BeNullOrEmpty
+        }
+    }
+
+    Context 'invoked through a call-operator shim' {
+        It 'denies an oversized Read and records telemetry' {
+            $dir = Get-ShuntFixtureDir
+            $shim = Join-Path $dir 'shim.ps1'
+            [IO.File]::WriteAllText($shim, "& '$($script:HookSource)' @args; exit `$LASTEXITCODE`n")
+            $inputJson = Get-ShuntInputJson -ToolName 'Read' -ToolInput @{ file_path = (Join-Path $dir 'big.txt') }
+            $result = Invoke-ShuntHook -WorkingDirectory $dir -InputJson $inputJson -ScriptPath $shim
+            $result.StdErr | Should -BeNullOrEmpty
+            Test-ShuntDeny -Result $result | Should -BeTrue
+            (Get-ShuntSinkLastRecord -Dir $dir).decision | Should -Be 'deny'
         }
     }
 

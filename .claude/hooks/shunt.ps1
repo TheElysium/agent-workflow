@@ -281,9 +281,10 @@ function Get-ShuntTelemetrySink {
     $capturedInput = $ParsedInput
     $capturedMaxBytes = $MaxBytes
     $capturedMinLines = $MinLines
+    $writeTelemetry = ${function:Write-ShuntTelemetry}
     return {
         param([string]$Tool, [string]$Decision, [string]$Reason, [string]$Path, $Bytes, $Lines)
-        Write-ShuntTelemetry -ParsedInput $capturedInput -MaxBytes $capturedMaxBytes -MinLines $capturedMinLines -Tool $Tool -Decision $Decision -Reason $Reason -Path $Path -Bytes $Bytes -Lines $Lines
+        & $writeTelemetry -ParsedInput $capturedInput -MaxBytes $capturedMaxBytes -MinLines $capturedMinLines -Tool $Tool -Decision $Decision -Reason $Reason -Path $Path -Bytes $Bytes -Lines $Lines
     }.GetNewClosure()
 }
 
