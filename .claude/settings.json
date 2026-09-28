@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/shunt.sh",
+            "command": "pwsh -NoProfile -File .claude/hooks/shunt.ps1",
             "timeout": 10
           }
         ]
