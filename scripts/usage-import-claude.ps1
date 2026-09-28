@@ -38,30 +38,36 @@ function Get-SortKey {
     return "$stripped.000000"
 }
 
-function Get-SinceMark {
-    param([Parameter(Mandatory)][string]$MetaPath, [Parameter(Mandatory)][string]$Session)
-    if (-not (Test-Path -LiteralPath $MetaPath)) { return '' }
+function Get-MetaMap {
+    param([Parameter(Mandatory)][string]$MetaPath)
+    $map = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::Ordinal)
+    if (-not (Test-Path -LiteralPath $MetaPath)) { return $map }
     foreach ($line in Get-Content -LiteralPath $MetaPath) {
-        $parts = $line.Split("`t", 2)
-        if ($parts.Length -ge 1 -and [string]::Equals($parts[0], $Session, [StringComparison]::Ordinal)) {
-            if ($parts.Length -ge 2) { return $parts[1] }
-            return ''
-        }
+        if ([string]::IsNullOrEmpty($line)) { continue }
+        $parts = $line.Split("`t")
+        $key = $parts[0]
+        $maxTs = if ($parts.Length -ge 2) { $parts[1] } else { '' }
+        $ticks = if ($parts.Length -ge 3) { $parts[2] } else { '' }
+        $map[$key] = [PSCustomObject]@{ MaxTs = $maxTs; Ticks = $ticks }
     }
-    return ''
+    return $map
 }
 
-function Write-MetaMark {
-    param([Parameter(Mandatory)][string]$MetaPath, [Parameter(Mandatory)][string]$Session, [Parameter(Mandatory)][string]$MaxTs)
-    $existing = @()
-    if (Test-Path -LiteralPath $MetaPath) {
-        $existing = @(Get-Content -LiteralPath $MetaPath)
+function Get-MetaMapEntry {
+    param([Parameter(Mandatory)]$MetaMap, [Parameter(Mandatory)][string]$Key)
+    if ($MetaMap.ContainsKey($Key)) { return $MetaMap[$Key] }
+    return [PSCustomObject]@{ MaxTs = ''; Ticks = '' }
+}
+
+function Write-MetaMap {
+    param([Parameter(Mandatory)][string]$MetaPath, [Parameter(Mandatory)]$MetaMap)
+    $lines = [Collections.Generic.List[string]]::new()
+    foreach ($key in $MetaMap.Keys) {
+        $entry = $MetaMap[$key]
+        $lines.Add("$key`t$($entry.MaxTs)`t$($entry.Ticks)")
     }
-    $prefix = "$Session`t"
-    $kept = @($existing | Where-Object { -not $_.StartsWith($prefix, [StringComparison]::Ordinal) })
-    $newLines = $kept + "$Session`t$MaxTs"
     $tempPath = "$MetaPath.tmp"
-    $content = ($newLines -join "`n") + "`n"
+    $content = if ($lines.Count -gt 0) { ($lines -join "`n") + "`n" } else { '' }
     [IO.File]::WriteAllText($tempPath, $content, [Text.UTF8Encoding]::new($false))
     Move-Item -LiteralPath $tempPath -Destination $MetaPath -Force
 }
@@ -168,6 +174,35 @@ function Select-DedupedRecord {
     return [PSCustomObject]@{ Lines = $lines; MaxTs = $maxTs }
 }
 
+function Get-TranscriptWorkItem {
+    param([Parameter(Mandatory)][string]$ProjectDir)
+    $items = [Collections.Generic.List[object]]::new()
+
+    $parentFiles = @(Get-ChildItem -LiteralPath $ProjectDir -Filter '*.jsonl' -File)
+    foreach ($file in $parentFiles) {
+        $session = if ($file.Name.EndsWith('.jsonl', [StringComparison]::Ordinal)) {
+            $file.Name.Substring(0, $file.Name.Length - 6)
+        } else {
+            $file.Name
+        }
+        $items.Add([PSCustomObject]@{ Key = $session; FilePath = $file.FullName; FallbackSession = $session })
+    }
+
+    $sessionDirs = @(Get-ChildItem -LiteralPath $ProjectDir -Directory)
+    foreach ($sessionDir in $sessionDirs) {
+        $subagentsDir = Join-Path $sessionDir.FullName 'subagents'
+        if (-not (Test-Path -LiteralPath $subagentsDir -PathType Container)) { continue }
+        $agentFiles = @(Get-ChildItem -LiteralPath $subagentsDir -Filter 'agent-*.jsonl' -File)
+        foreach ($agentFile in $agentFiles) {
+            $agentBase = $agentFile.Name.Substring(0, $agentFile.Name.Length - 6)
+            $key = "$($sessionDir.Name)/subagents/$agentBase"
+            $items.Add([PSCustomObject]@{ Key = $key; FilePath = $agentFile.FullName; FallbackSession = $sessionDir.Name })
+        }
+    }
+
+    return $items
+}
+
 function Get-RequiredArgValue {
     param([Parameter(Mandatory)][AllowEmptyString()][string[]]$ArgList, [Parameter(Mandatory)][int]$Index, [Parameter(Mandatory)][string]$Name)
     if ($Index + 1 -ge $ArgList.Count) {
@@ -225,39 +260,46 @@ foreach ($path in @($outArg, $metaPath)) {
     }
 }
 
-$transcriptFiles = @(Get-ChildItem -LiteralPath $src -Filter '*.jsonl' -File)
-if ($transcriptFiles.Count -eq 0) {
+$workItems = Get-TranscriptWorkItem -ProjectDir $src
+if ($workItems.Count -eq 0) {
     exit 0
 }
 
-$names = [string[]]($transcriptFiles | ForEach-Object { $_.Name })
-[Array]::Sort($names, [StringComparer]::Ordinal)
+$itemsByKey = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::Ordinal)
+foreach ($item in $workItems) { $itemsByKey[$item.Key] = $item }
+$keys = [string[]]$itemsByKey.Keys
+[Array]::Sort($keys, [StringComparer]::Ordinal)
 
-foreach ($name in $names) {
-    $filePath = Join-Path $src $name
-    $session = if ($name.EndsWith('.jsonl', [StringComparison]::Ordinal)) {
-        $name.Substring(0, $name.Length - 6)
-    } else {
-        $name
+$metaMap = Get-MetaMap -MetaPath $metaPath
+
+foreach ($key in $keys) {
+    $item = $itemsByKey[$key]
+    $filePath = $item.FilePath
+    $fileInfo = Get-Item -LiteralPath $filePath
+    $ticks = [string]$fileInfo.LastWriteTimeUtc.Ticks
+
+    $entry = Get-MetaMapEntry -MetaMap $metaMap -Key $key
+    if (-not [string]::IsNullOrEmpty($entry.Ticks) -and [string]::Equals($entry.Ticks, $ticks, [StringComparison]::Ordinal)) {
+        continue
     }
 
-    $since = Get-SinceMark -MetaPath $metaPath -Session $session
-    $records = Import-TranscriptFile -FilePath $filePath -FallbackSession $session
-    $result = Select-DedupedRecord -Records $records -Since $since
+    $records = Import-TranscriptFile -FilePath $filePath -FallbackSession $item.FallbackSession
+    $result = Select-DedupedRecord -Records $records -Since $entry.MaxTs
 
     foreach ($line in $result.Lines) {
         Add-TextLineWithRetry -Path $outArg -Line $line
     }
 
     if ($env:USAGE_IMPORT_DEBUG) {
-        $debugPath = Join-Path (Get-Location).Path ".usage-import-debug-$session.jsonl"
+        $debugKey = $key.Replace('/', '-')
+        $debugPath = Join-Path (Get-Location).Path ".usage-import-debug-$debugKey.jsonl"
         $debugContent = if ($result.Lines.Count -gt 0) { ($result.Lines -join "`n") + "`n" } else { '' }
         [IO.File]::WriteAllText($debugPath, $debugContent, [Text.UTF8Encoding]::new($false))
     }
 
-    if (-not [string]::IsNullOrEmpty($result.MaxTs)) {
-        Write-MetaMark -MetaPath $metaPath -Session $session -MaxTs $result.MaxTs
-    }
+    $newMaxTs = if (-not [string]::IsNullOrEmpty($result.MaxTs)) { $result.MaxTs } else { $entry.MaxTs }
+    $metaMap[$key] = [PSCustomObject]@{ MaxTs = $newMaxTs; Ticks = $ticks }
+    Write-MetaMap -MetaPath $metaPath -MetaMap $metaMap
 }
 
 exit 0
