@@ -1,7 +1,7 @@
 # agent-workflow
 
 Versioned, copy-paste kit for a multi-agent development workflow with **Claude Code**
-(opencode optional): task routing, agent roster, token-shunt hook, enforceable gates.
+(opencode support unmaintained): task routing, agent roster, token-shunt hook, enforceable gates.
 
 ## Why
 
@@ -67,9 +67,8 @@ other projects running the other mode.
 Isolated, versioned with the project; safe default when different projects need
 different agent tuning or workflow revisions.
 
-```bash
-cp -r AGENTS.md CLAUDE.md .gates.yml .claude .opencode /path/to/project/
-cd /path/to/project
+```powershell
+Copy-Item -Recurse AGENTS.md, CLAUDE.md, .gates.yml, .claude, .opencode /path/to/project/
 ```
 
 ### Global (one copy, every session, any project)
@@ -79,26 +78,20 @@ SymbolicLink` and Git Bash `ln -s` with `MSYS=winsymlinks:nativestrict` both fai
 without elevation; plain `ln -s` silently falls back to a copy, not a link). Until that
 trade-off is settled, plain shims — no elevation needed:
 
-```bash
-REPO=/path/to/agent-workflow   # this repo, cloned once
+```powershell
+$REPO = 'C:/path/to/agent-workflow'   # this repo, cloned once
+New-Item -ItemType Directory -Force ~/.claude/hooks, ~/.claude/skills/dev-workflow, ~/.claude/agents | Out-Null
 
 # AGENTS.md: one-line native import
-mkdir -p ~/.claude
-echo "@$REPO/AGENTS.md" > ~/.claude/AGENTS.md
+Set-Content ~/.claude/AGENTS.md "@$REPO/AGENTS.md"
 
-# shunt.sh: one-line exec shim (hooks run as scripts, @import doesn't apply)
-mkdir -p ~/.claude/hooks
-cat > ~/.claude/hooks/shunt.sh <<EOF
-#!/usr/bin/env bash
-# Shim — source of truth is the agent-workflow repo. Do not edit this copy;
-# edit .claude/hooks/shunt.sh in the repo instead, this file just execs it.
-exec bash "$REPO/.claude/hooks/shunt.sh" "\$@"
-EOF
-chmod +x ~/.claude/hooks/shunt.sh
+# shunt hook + statusline: one-line call shims (hooks run as scripts, @import doesn't apply)
+foreach ($s in 'hooks/shunt.ps1', 'statusline-command.ps1') {
+    Set-Content ~/.claude/$s "& '$REPO/.claude/$s' @args; exit `$LASTEXITCODE"
+}
 
 # dev-workflow skill: one-line pointer shim (skills don't support @import either)
-mkdir -p ~/.claude/skills/dev-workflow
-cat > ~/.claude/skills/dev-workflow/SKILL.md <<EOF
+Set-Content ~/.claude/skills/dev-workflow/SKILL.md @"
 ---
 name: dev-workflow
 description: Multi-phase development workflow (spec, plan, implement, verify gates, git, multi-agent orchestration) for T1/T2 tasks — substantial features, refactors, or anything touching architecture, auth, DB, or a public API surface. Use when a task is routed T1 or T2 per AGENTS.md task-routing criteria, or when the user asks to "follow the workflow" / "orchestrate this".
@@ -112,18 +105,28 @@ $REPO/.claude/skills/dev-workflow/SKILL.md
 
 Its sibling files (gates.md, ui.md, metrics.md) sit next to that repo file,
 not next to this shim; read them from $REPO too, when their trigger applies.
-EOF
+"@
 
 # agent roster: no pointer mechanism available — plain synced copies
-mkdir -p ~/.claude/agents
-cp "$REPO"/.claude/agents/*.md ~/.claude/agents/
+Copy-Item "$REPO/.claude/agents/*.md" ~/.claude/agents/
 ```
 
-Re-run the last `cp` whenever `.claude/agents/*.md` changes in the repo — nothing
+Wire the shims in `~/.claude/settings.json`, absolute forward-slash paths (hook shell
+varies):
+
+```json
+"hooks": { "PreToolUse": [ { "matcher": "Read|Bash", "hooks": [
+  { "type": "command", "command": "pwsh -NoProfile -File C:/Users/<you>/.claude/hooks/shunt.ps1", "timeout": 10 } ] } ] },
+"statusLine": { "type": "command", "command": "pwsh -NoProfile -File C:/Users/<you>/.claude/statusline-command.ps1" }
+```
+
+Re-run the last `Copy-Item` whenever `.claude/agents/*.md` changes in the repo — nothing
 detects drift automatically:
 
-```bash
-diff -rq ~/.claude/agents "$REPO/.claude/agents"
+```powershell
+Get-ChildItem "$REPO/.claude/agents/*.md" | Where-Object {
+    (Get-FileHash $_).Hash -ne (Get-FileHash "~/.claude/agents/$($_.Name)" -ErrorAction SilentlyContinue).Hash
+} | Select-Object -ExpandProperty Name
 ```
 
 Restart any running Claude Code session after first-time setup — it only detects a new
@@ -139,17 +142,16 @@ with their own `.gates.yml` + pre-commit, but they are not part of the copy.
 ```
 AGENTS.md                  routing + shunt rules, always loaded. CLAUDE.md = one line @AGENTS.md
 .claude/settings.json      permissions, hooks, statusLine       settings.local.json  never committed
-.claude/statusline-command.sh  referenced by settings.json
-.claude/hooks/              shunt.sh (PreToolUse), session-end.sh (usage import)
+.claude/statusline-command.ps1  referenced by settings.json
+.claude/hooks/              shunt.ps1 (PreToolUse), session-end.ps1 (usage import), shunt.Tests.ps1
 .claude/agents/             implementer reviewer gate-keeper explore bulk-reader code-writer spec-critic
 .claude/skills/dev-workflow/ 5-phase workflow + multi-agent rules, loaded on demand for T1/T2; gates.md, ui.md, metrics.md read only when triggered
-.opencode/agent/            same roster, opencode format (+ build)
-.opencode/plugins/          shunt.ts (parity with shunt.sh), usage-log.ts
-scripts/run-gates.sh        executes .gates.yml (gate-keeper + CI)
-scripts/review-checklist.sh per-file checklist fed to the reviewer
-scripts/{usage-report,usage-import-claude,session-tools,shunt-report}.sh   cost + telemetry
-scripts/test-*.sh           kit-only tests, not shipped to projects
+.opencode/                  unmaintained: roster, shunt.ts, usage-log.ts, bun tests; outside gates and CI
+scripts/run-gates.ps1       executes .gates.yml (gate-keeper + CI)
+scripts/review-checklist.ps1 per-file checklist fed to the reviewer
+scripts/{usage-report,usage-import-claude,session-tools,shunt-report}.ps1   cost + telemetry
 .gates.yml                  lint / typecheck / build / test / sast / format
+PSScriptAnalyzerSettings.psd1 lint rules for the .ps1 gate
 .github/ githooks/          this repo's own CI and self-gate, not shipped to projects
 ```
 
@@ -162,8 +164,9 @@ scripts/test-*.sh           kit-only tests, not shipped to projects
   (`echo "gate not configured" >&2 && exit 1`). A green run proving nothing is worse than none.
 - SAST is non-skippable. A run without it is a red gate. Missing tool = FAIL, never skip.
 - Local-only by default; CI optional. Long tasks persist state in `docs/tasks/<slug>.md`.
-- This repo self-gates: `git config core.hooksPath githooks` (shellcheck, secrets, ASCII,
-  JSON, `CLAUDE.md == @AGENTS.md`).
+- This repo self-gates: `git config core.hooksPath githooks` (PSScriptAnalyzer, secrets,
+  accents, JSON, `CLAUDE.md == @AGENTS.md`); `githooks/pre-commit` is a sh shim to
+  `pre-commit.ps1`.
 
 ## Per-project overrides
 
@@ -175,28 +178,28 @@ base; the project file adds stack specifics.
 
 | Tool | Needed by | Notes |
 |---|---|---|
-| Git Bash | Claude Code hooks | `bash.exe` in `C:\Windows\system32` is WSL bash, not Git Bash |
-| `jq` | shunt hook, settings merges, reports | `winget install jqlang.jq`. Missing -> shunt fails open silently |
-| `shellcheck`, `gitleaks` | gates, self-gate | missing gate tool = hard red |
-| `bun` | opencode plugins only | `bun install` in `.opencode/` |
+| PowerShell 7.5+ (`pwsh`) | hooks, statusline, scripts, gates | `winget install Microsoft.PowerShell` |
+| PSScriptAnalyzer 1.25.0, Pester 6.2.0 | lint + test gates, self-gate | `Install-Module <name> -RequiredVersion <v> -Scope CurrentUser` |
+| `gitleaks` | sast gate, self-gate | missing gate tool = hard red |
+| `bun` | opencode plugins only (unmaintained) | `bun install` in `.opencode/` |
 
-Paths in `settings.json` are relative to the project root. Only machine-specific knob:
-`SHUNT_TEST_TMP` (fixture temp dir in `test-shunt.sh`, dev only).
+Paths in `settings.json` are relative to the project root.
 
 ## Cross-tool parity
 
-- **Shunt**: `shunt.ts` (opencode) and `shunt.sh` (Claude), same thresholds - 350 lines /
+- **Shunt**: `shunt.ts` (opencode) and `shunt.ps1` (Claude), same thresholds - 350 lines /
   65536 bytes, tunable with `SHUNT_MIN_LINES` / `SHUNT_MAX_BYTES`. Divergences: exactly
-  350 lines passes on the Claude side (`wc -l`), blocked on the opencode side (counts the
+  350 lines passes on the Claude side (counts `\n`), blocked on the opencode side (counts the
   trailing newline); `verb/foo.txt` with no trailing space is blocked opencode-side only.
-  Claude flags subagent calls with a top-level `agent_id`. Test: `bash .claude/hooks/test-shunt.sh`.
+  Claude flags subagent calls with a top-level `agent_id`. MSYS drive paths (`/c/...`) in
+  Bash-tool commands resolve to `C:\...`. Test: `Invoke-Pester .claude/hooks/shunt.Tests.ps1`.
 - **Skills**: no opencode copy needed - it discovers `.claude/skills/*/SKILL.md` natively.
 - **Telemetry**: every shunt decision (allow and deny) appends one JSONL line to
   `.usage/shunt.jsonl`. Schema: `ts` `harness` `session` `tool` `decision` `reason` `path`
   `bytes` `lines` `threshold_bytes` `threshold_lines`, plus `command` (bash) or
   `offset`/`limit` (read); records with no `decision` are legacy denies. One record per
   file arg. Best-effort: a write failure never blocks the redirect. Aggregate with
-  `scripts/shunt-report.sh`. Never rotated - purge with `rm .usage/shunt.jsonl`.
+  `scripts/shunt-report.ps1`. Never rotated - purge with `Remove-Item .usage/shunt.jsonl`.
 - **Accepted divergences**: `hidden`/`temperature` opencode-only; `effort` Claude-only, so
   model tiers are set independently; detailed permissions opencode-only; `git push` ask is
   a permission rule (Claude) vs a `permission` field (opencode).

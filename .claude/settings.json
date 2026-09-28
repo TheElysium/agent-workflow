@@ -7,7 +7,7 @@
   },
   "statusLine": {
     "type": "command",
-    "command": "bash .claude/statusline-command.sh"
+    "command": "pwsh -NoProfile -File .claude/statusline-command.ps1"
   },
   "hooks": {
     "PreToolUse": [
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/shunt.sh",
+            "command": "pwsh -NoProfile -File .claude/hooks/shunt.ps1",
             "timeout": 10
           }
         ]
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/session-end.sh",
+            "command": "pwsh -NoProfile -File .claude/hooks/session-end.ps1",
             "timeout": 10
           }
         ]

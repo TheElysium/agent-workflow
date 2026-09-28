@@ -1,7 +1,3 @@
-# CI gates for agent-workflow itself.
-# Executes .gates.yml verbatim via scripts/run-gates.sh so local gates and CI
-# can never drift apart.
-
 name: gates
 on:
   push:
@@ -12,13 +8,16 @@ jobs:
   gates:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout with full history for gitleaks
+        uses: actions/checkout@v4
         with:
-          fetch-depth: 0            # gitleaks needs history
+          fetch-depth: 0
 
-      # --- toolchain (shell stack) ---------------------------------------
-      - name: Install shellcheck
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+      - name: Install Pester and PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Install-Module -Name Pester -RequiredVersion 6.2.0 -Scope CurrentUser -Force -SkipPublisherCheck
+          Install-Module -Name PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force
 
       - name: Install gitleaks
         run: |
@@ -28,9 +27,5 @@ jobs:
           sudo install -m 755 /tmp/gitleaks /usr/local/bin/gitleaks
           gitleaks version
 
-      - name: Setup bun
-        uses: oven-sh/setup-bun@v2
-
-      # --- run the canonical gate definitions ----------------------------
       - name: Run gates
-        run: bash scripts/run-gates.sh
+        run: pwsh -NoProfile -File scripts/run-gates.ps1
