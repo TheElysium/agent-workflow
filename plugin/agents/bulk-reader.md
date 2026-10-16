@@ -1,6 +1,6 @@
 ---
 name: bulk-reader
-description: Bulk file reader for code analysis - delegates I/O-heavy multi-file reading away from the primary model. Use when answering a question requires reading multiple large files, mapping an architecture, or finding where something is implemented. Returns structured bullets only.
+description: Bulk file reader for code analysis - delegates I/O-heavy multi-file reading away from the primary model. Use when answering a question requires reading a file over 350 lines / 64 KB (minified JSON, dashboards, big configs) or several large files, mapping an architecture, or finding where something is implemented Never write scripts to parse structured data. Not for targeted reads with a known offset/limit. Returns structured bullets only.
 model: haiku
 tools: Read, Glob, Grep, Bash
 ---

@@ -1,6 +1,6 @@
 ---
 name: code-writer
-description: Boilerplate code generator - delegates output-heavy, pattern-following work away from the primary model. Use for generating test files, config scaffolding, type stubs, or repetitive code that must match existing patterns in the project. Requires a reference file to match conventions against.
+description: Boilerplate code generator - delegates output-heavy, pattern-following work away from the primary model. Use for generating test files, config scaffolding, type stubs, or repetitive code that must match existing patterns in the project. Requires a spec, a reference file to match conventions against, and a target path. Not for edits to existing code driven by analysis.
 model: haiku
 tools: Read, Write, Edit, Glob, Grep
 ---

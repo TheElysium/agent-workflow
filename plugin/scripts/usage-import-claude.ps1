@@ -245,6 +245,7 @@ if (-not (Test-Path -LiteralPath $src -PathType Container)) {
 
 $outParent = Split-Path -Path $outArg -Parent
 if ($outParent) {
+    $outParent = [IO.Path]::GetFullPath($outParent, (Get-Location).Path)
     $outParentIsNew = -not (Test-Path -LiteralPath $outParent)
     New-Item -ItemType Directory -Force -Path $outParent | Out-Null
     if ($outParentIsNew -and (Split-Path -Path $outParent -Leaf) -ceq '.usage') {

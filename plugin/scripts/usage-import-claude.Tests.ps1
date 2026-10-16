@@ -1,8 +1,8 @@
 #Requires -Version 7.5
 
 BeforeAll {
-    $script:RealRepoRoot = Split-Path -Parent $PSScriptRoot
-    $script:ScriptPath = Join-Path $script:RealRepoRoot 'scripts/usage-import-claude.ps1'
+    $script:PluginRoot = Split-Path -Parent $PSScriptRoot
+    $script:ScriptPath = Join-Path $script:PluginRoot 'scripts/usage-import-claude.ps1'
     $script:PwshCmd = (Get-Command pwsh).Source
 
     function Initialize-IsolatedRoot {
@@ -66,7 +66,7 @@ BeforeAll {
         $psi.UseShellExecute = $false
         $psi.RedirectStandardOutput = $true
         $psi.RedirectStandardError = $true
-        $psi.WorkingDirectory = if ($WorkingDirectory) { $WorkingDirectory } else { $script:RealRepoRoot }
+        $psi.WorkingDirectory = if ($WorkingDirectory) { $WorkingDirectory } else { $script:PluginRoot }
         $psi.EnvironmentVariables.Remove('USAGE_IMPORT_DEBUG')
         if ($EnvVars) {
             foreach ($k in $EnvVars.Keys) { $psi.EnvironmentVariables[$k] = $EnvVars[$k] }

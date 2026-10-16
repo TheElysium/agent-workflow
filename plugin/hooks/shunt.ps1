@@ -103,8 +103,8 @@ function Get-ShuntRedirectReason {
     param([string]$DisplayPath, [string]$Why)
     $l1 = "BLOCKED by shunt: `"$DisplayPath`" has $Why."
     $l2 = "Do NOT read this file directly $script:EmDash delegate I/O instead:"
-    $l3 = '  - For analysis/questions across files (incl. minified JSON): use the task tool with subagent "bulk-reader" (pass file paths + your question; you only consume the summary).'
-    $l4 = '  - For boilerplate generation: use the task tool with subagent "code-writer" (pass spec + reference file + target path).'
+    $l3 = '  - For analysis/questions across files (incl. minified JSON): use the task tool with subagent "agent-workflow:bulk-reader" (pass file paths + your question; you only consume the summary).'
+    $l4 = '  - For boilerplate generation: use the task tool with subagent "agent-workflow:code-writer" (pass spec + reference file + target path).'
     $l5 = "  - If you must edit a specific section of this file, do a targeted read with BOTH offset and limit (an offset alone reads the unbounded rest of the file) $script:EmDash that is allowed."
     return ($l1, $l2, $l3, $l4, $l5) -join $script:NewlineChar
 }
@@ -283,7 +283,7 @@ function Write-ShuntSinkSelfIgnore {
     try {
         [IO.File]::WriteAllText((Join-Path $SinkDir '.gitignore'), "*`n", [Text.UTF8Encoding]::new($false))
     } catch {
-        return
+        $null = $_
     }
 }
 

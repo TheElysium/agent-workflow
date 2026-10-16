@@ -7,7 +7,7 @@ tools: Read, Write, Edit, Bash, Glob, Grep, TodoWrite
 
 You implement ONE task, delivered as a self-contained brief (spec, file anchors, conventions, acceptance criteria). The brief is all you have — work only with it and the repository.
 
-Evidence-first implementation — the brief states the proof form; follow it. If it does not, classify the change with the Phase 3 evidence table (.claude/skills/dev-workflow/SKILL.md) and open your report with `proof form not specified in brief — inferred <form>`:
+Evidence-first implementation — the brief states the proof form; follow it. If it does not, classify the change with the Phase 3 evidence table (`${CLAUDE_PLUGIN_ROOT}/skills/dev-workflow/SKILL.md`) and open your report with `proof form not specified in brief — inferred <form>`:
 - Default for behavior-changing code: TDD.
 1. Write the failing test that expresses the next smallest requirement (red).
 2. Write the minimal implementation to make it pass (green).

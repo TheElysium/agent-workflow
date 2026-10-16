@@ -1,13 +1,13 @@
 # agent-workflow
 
-Versioned, copy-paste kit for a multi-agent development workflow with **Claude Code**
-(opencode support unmaintained): task routing, agent roster, token-shunt hook, enforceable gates.
+Claude Code plugin for a multi-agent development workflow (opencode support unmaintained):
+task routing, agent roster, token-shunt hook, enforceable gates.
 
 ## Why
 
 - **Route before working.** A typo must not pay for a spec, a critic and two gate runs.
-- **Load rules on demand.** `AGENTS.md` ~600 tokens, always on. The five phases ~4500,
-  only when routed T1/T2.
+- **Load rules on demand.** Only the skill and agent descriptions are always on; the
+  routing table and five phases (~2300 tokens) load when a task routes T1/T2.
 - **Cheap models read, the expensive one decides.** The shunt hook redirects large reads
   to subagents; reasoning stays on the primary model.
 - **Two gates.** `.gates.yml` proves the code runs; the reviewer proves it does what was
@@ -54,112 +54,71 @@ flowchart TD
 | **T1** | 2-3 files, existing tests prove it | `dev-workflow` skill |
 | **T2** | architecture, auth, DB, API, security, or 3+ files with new behavior | `dev-workflow` skill |
 
-In doubt, route one level up. Routing lives in `AGENTS.md`, phases in
-`.claude/skills/dev-workflow/SKILL.md`.
+In doubt, route one level up. Trigger criteria live in the skill description, the table
+and phases in `plugin/skills/dev-workflow/SKILL.md`.
 
 ## Install
 
-Two ways to deploy the kit — pick one per machine, they aren't mutually exclusive with
-other projects running the other mode.
-
-### Per-project
-
-Isolated, versioned with the project; safe default when different projects need
-different agent tuning or workflow revisions.
-
 ```powershell
-Copy-Item -Recurse AGENTS.md, CLAUDE.md, .gates.yml, .claude, .opencode /path/to/project/
+claude plugin marketplace add TheElysium/agent-workflow
+claude plugin install agent-workflow@agent-workflow
 ```
 
-### Global (one copy, every session, any project)
+Restart running sessions after install or update. Skill: `/agent-workflow:dev-workflow`;
+agents: `agent-workflow:<name>`.
 
-Symlinks need admin on Windows (tested twice: PowerShell `New-Item -ItemType
-SymbolicLink` and Git Bash `ln -s` with `MSYS=winsymlinks:nativestrict` both fail
-without elevation; plain `ln -s` silently falls back to a copy, not a link). Until that
-trade-off is settled, plain shims — no elevation needed:
-
-```powershell
-$REPO = 'C:/path/to/agent-workflow'   # this repo, cloned once
-New-Item -ItemType Directory -Force ~/.claude/hooks, ~/.claude/skills/dev-workflow, ~/.claude/agents | Out-Null
-
-# AGENTS.md: one-line native import
-Set-Content ~/.claude/AGENTS.md "@$REPO/AGENTS.md"
-
-# shunt hook + statusline: one-line call shims (hooks run as scripts, @import doesn't apply)
-foreach ($s in 'hooks/shunt.ps1', 'statusline-command.ps1') {
-    Set-Content ~/.claude/$s "& '$REPO/.claude/$s' @args; exit `$LASTEXITCODE"
-}
-
-# dev-workflow skill: one-line pointer shim (skills don't support @import either)
-Set-Content ~/.claude/skills/dev-workflow/SKILL.md @"
----
-name: dev-workflow
-description: Multi-phase development workflow (spec, plan, implement, verify gates, git, multi-agent orchestration) for T1/T2 tasks — substantial features, refactors, or anything touching architecture, auth, DB, or a public API surface. Use when a task is routed T1 or T2 per AGENTS.md task-routing criteria, or when the user asks to "follow the workflow" / "orchestrate this".
----
-
-Shim — source of truth is the agent-workflow repo. Do not edit this copy;
-edit .claude/skills/dev-workflow/SKILL.md in the repo instead.
-
-Read and follow exactly:
-$REPO/.claude/skills/dev-workflow/SKILL.md
-
-Its sibling files (gates.md, ui.md, metrics.md) sit next to that repo file,
-not next to this shim; read them from $REPO too, when their trigger applies.
-"@
-
-# agent roster: no pointer mechanism available — plain synced copies
-Copy-Item "$REPO/.claude/agents/*.md" ~/.claude/agents/
-```
-
-Wire the shims in `~/.claude/settings.json`, absolute forward-slash paths (hook shell
-varies):
+Not shippable in a plugin — add by hand to `~/.claude/settings.json` if wanted:
 
 ```json
-"hooks": { "PreToolUse": [ { "matcher": "Read|Bash", "hooks": [
-  { "type": "command", "command": "pwsh -NoProfile -File C:/Users/<you>/.claude/hooks/shunt.ps1", "timeout": 10 } ] } ] },
-"statusLine": { "type": "command", "command": "pwsh -NoProfile -File C:/Users/<you>/.claude/statusline-command.ps1" }
+"permissions": { "ask": ["Bash(git push:*)", "Bash(git push)"] },
+"statusLine": { "type": "command", "command": "pwsh -NoProfile -File C:/path/to/statusline-command.ps1" }
 ```
 
-Re-run the last `Copy-Item` whenever `.claude/agents/*.md` changes in the repo — nothing
-detects drift automatically:
+`statusline-command.ps1` is in `.claude/` of a clone of this repo (not installed by the plugin).
+
+Per project: create `.gates.yml` at the root (format in `plugin/skills/dev-workflow/gates.md`),
+optionally `.claude/stacks/<stack>.md`. Plugin agents cannot be overridden by a same-name
+project agent: a project `.claude/agents/<name>.md` is a separate agent.
+
+### Develop
+
+- Test local changes without installing: `claude --plugin-dir C:/path/to/agent-workflow/plugin`,
+  `/reload-plugins` after edits.
+- Every merge to `main` touching `plugin/` bumps `version` in `plugin/.claude-plugin/plugin.json`;
+  installed copies only update on a new version (`claude plugin update agent-workflow`).
+- Validate: `claude plugin validate plugin --strict` and `claude plugin validate .`.
+
+### Rollback
 
 ```powershell
-Get-ChildItem "$REPO/.claude/agents/*.md" | Where-Object {
-    (Get-FileHash $_).Hash -ne (Get-FileHash "~/.claude/agents/$($_.Name)" -ErrorAction SilentlyContinue).Hash
-} | Select-Object -ExpandProperty Name
+claude plugin uninstall agent-workflow
+claude plugin marketplace remove agent-workflow
 ```
-
-Restart any running Claude Code session after first-time setup — it only detects a new
-`~/.claude/agents/` directory at session start.
-
-This repo itself uses its own kit (auto-dogfooding), in global mode. Beyond the kit it
-carries `githooks/` and `.gates.yml` for its own self-gate (wired with
-`git config core.hooksPath githooks` here only); projects may mirror the gate pattern
-with their own `.gates.yml` + pre-commit, but they are not part of the copy.
 
 ## Layout
 
 ```
-AGENTS.md                  routing + shunt rules, always loaded. CLAUDE.md = one line @AGENTS.md
-.claude/settings.json      permissions, hooks, statusLine       settings.local.json  never committed
-.claude/statusline-command.ps1  referenced by settings.json
-.claude/hooks/              shunt.ps1 (PreToolUse), session-end.ps1 (usage import), shunt.Tests.ps1
-.claude/agents/             implementer reviewer gate-keeper explore bulk-reader code-writer spec-critic
-.claude/skills/dev-workflow/ 5-phase workflow + multi-agent rules, loaded on demand for T1/T2; gates.md, ui.md, metrics.md read only when triggered
-.claude/stacks/<stack>.md   per-project stack traps, one line each, path passed to implementer + reviewer
-.opencode/                  unmaintained: roster, shunt.ts, usage-log.ts, bun tests; outside gates and CI
-scripts/run-gates.ps1       executes .gates.yml (gate-keeper + CI)
-scripts/review-checklist.ps1 per-file checklist fed to the reviewer
-scripts/{usage-report,usage-import-claude,session-tools,shunt-report}.ps1   cost + telemetry
-.gates.yml                  lint / typecheck / build / test / sast / format
-PSScriptAnalyzerSettings.psd1 lint rules for the .ps1 gate
-.github/ githooks/          this repo's own CI and self-gate, not shipped to projects
+.claude-plugin/marketplace.json   marketplace `agent-workflow`, source ./plugin
+plugin/.claude-plugin/plugin.json manifest (name, version)
+plugin/agents/                    implementer reviewer gate-keeper explore bulk-reader code-writer spec-critic
+plugin/skills/dev-workflow/       routing + 5 phases + multi-agent rules; gates.md, ui.md, metrics.md read when triggered
+plugin/hooks/                     hooks.json; shunt.ps1 (PreToolUse), session-end.ps1 (usage import)
+plugin/scripts/                   review-checklist, usage-report, usage-import-claude, session-tools, shunt-report
+plugin/**/*.Tests.ps1             Pester, next to the file under test; plugin.Tests.ps1 guards manifests and paths
+AGENTS.md                         this repo's rules only. CLAUDE.md = one line @AGENTS.md
+.claude/settings.json             this repo: permissions, statusLine   settings.local.json  never committed
+.claude/stacks/<stack>.md         per-project stack traps, one line each, path passed to implementer + reviewer
+.opencode/                        unmaintained: roster, shunt.ts, usage-log.ts, bun tests; outside gates and CI
+scripts/run-gates.ps1             executes .gates.yml (gate-keeper + CI)
+.gates.yml                        lint / test / sast
+PSScriptAnalyzerSettings.psd1     lint rules for the .ps1 gate
+.github/ githooks/                this repo's own CI and self-gate, not shipped
 ```
 
 ## Gates
 
 - `.gates.yml` at every project root is the single source of gate commands (format
-  documented in `.claude/skills/dev-workflow/gates.md`); `gate-keeper` runs it verbatim.
+  documented in `plugin/skills/dev-workflow/gates.md`); `gate-keeper` runs it verbatim.
   Missing file -> built with the user, never guessed.
 - A generated skeleton emits unfillable gates as hard reds
   (`echo "gate not configured" >&2 && exit 1`). A green run proving nothing is worse than none.
@@ -168,12 +127,6 @@ PSScriptAnalyzerSettings.psd1 lint rules for the .ps1 gate
 - This repo self-gates: `git config core.hooksPath githooks` (PSScriptAnalyzer, secrets,
   accents, JSON, `CLAUDE.md == @AGENTS.md`); `githooks/pre-commit` is a sh shim to
   `pre-commit.ps1`.
-
-## Per-project overrides
-
-Same-name file in the project: `.claude/agents/<name>.md` or `.opencode/agent/<id>.md`
-(opencode merges: scalars replaced, permission rules appended). Kit definition is the
-base; the project file adds stack specifics.
 
 ## Dependencies
 
@@ -184,35 +137,30 @@ base; the project file adds stack specifics.
 | `gitleaks` | sast gate, self-gate | missing gate tool = hard red |
 | `bun` | opencode plugins only (unmaintained) | `bun install` in `.opencode/` |
 
-Paths in `settings.json` are relative to the project root.
-
-## Cross-tool parity
+## Telemetry
 
 - **Shunt**: `shunt.ts` (opencode) and `shunt.ps1` (Claude), same thresholds - 350 lines /
   65536 bytes, tunable with `SHUNT_MIN_LINES` / `SHUNT_MAX_BYTES`. Divergences: exactly
   350 lines passes on the Claude side (counts `\n`), blocked on the opencode side (counts the
   trailing newline); `verb/foo.txt` with no trailing space is blocked opencode-side only.
   Claude flags subagent calls with a top-level `agent_id`. MSYS drive paths (`/c/...`) in
-  Bash-tool commands resolve to `C:\...`. Test: `Invoke-Pester .claude/hooks/shunt.Tests.ps1`.
-- **Skills**: no opencode copy needed - it discovers `.claude/skills/*/SKILL.md` natively.
-- **Telemetry**: every shunt decision (allow and deny) appends one JSONL line to
+  Bash-tool commands resolve to `C:\...`.
+- **Sink**: hooks write to `.usage/` in the project root; a `.usage/` created by the kit
+  holds a `.gitignore` with `*`. Purge with `Remove-Item -Recurse .usage`.
+- **Shunt log**: every decision (allow and deny) appends one JSONL line to
   `.usage/shunt.jsonl`. Schema: `ts` `harness` `session` `tool` `decision` `reason` `path`
   `bytes` `lines` `threshold_bytes` `threshold_lines`, plus `command` (bash) or
   `offset`/`limit` (read); records with no `decision` are legacy denies. One record per
   file arg. Best-effort: a write failure never blocks the redirect. Aggregate with
-  `scripts/shunt-report.ps1`. Never rotated - purge with `Remove-Item .usage/shunt.jsonl`.
+  `plugin/scripts/shunt-report.ps1`. Never rotated.
 - **Usage**: SessionEnd imports main and subagent transcripts
   (`<session>/subagents/agent-*.jsonl`) into `.usage/usage.jsonl`; unchanged files are skipped
   by mtime. First run on a large history may exceed the 10 s hook timeout (progress is kept):
-  `pwsh -NoProfile -File scripts/usage-import-claude.ps1 --project <slug> --out .usage/usage.jsonl`.
+  `pwsh -NoProfile -File <plugin>/scripts/usage-import-claude.ps1 --project <slug> --out .usage/usage.jsonl`
+  (`<plugin>` = installed plugin root under `~/.claude/plugins/cache/`, or `plugin/` of a clone).
 - **Accepted divergences**: `hidden`/`temperature` opencode-only; `effort` Claude-only, so
-  model tiers are set independently; detailed permissions opencode-only; `git push` ask is
-  a permission rule (Claude) vs a `permission` field (opencode).
-- `.claude/settings.json` is versioned without secrets (credentials live in
-  `.claude/settings.local.json`, never committed).
-- `.opencode/settings.local.json` is also machine-local and never committed.
-
-This repo runs its own kit in global mode.
+  model tiers are set independently; detailed permissions opencode-only. opencode no longer
+  discovers the skill (moved under `plugin/`).
 
 ## License
 

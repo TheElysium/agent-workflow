@@ -244,8 +244,8 @@ Describe 'shunt hook' {
             $parsed.hookSpecificOutput.hookEventName | Should -Be 'PreToolUse'
             $parsed.hookSpecificOutput.permissionDecision | Should -Be 'deny'
             $parsed.hookSpecificOutput.permissionDecisionReason | Should -Match 'BLOCKED by shunt'
-            $parsed.hookSpecificOutput.permissionDecisionReason | Should -Match 'bulk-reader'
-            $parsed.hookSpecificOutput.permissionDecisionReason | Should -Match 'code-writer'
+            $parsed.hookSpecificOutput.permissionDecisionReason | Should -Match 'agent-workflow:bulk-reader'
+            $parsed.hookSpecificOutput.permissionDecisionReason | Should -Match 'agent-workflow:code-writer'
         }
     }
 
@@ -682,6 +682,23 @@ Describe 'shunt hook' {
             $inputJson = Get-ShuntInputJson -ToolName 'Read' -ToolInput @{ file_path = (Join-Path $dir 'small.txt') }
             Invoke-ShuntHook -WorkingDirectory $dir -InputJson $inputJson | Out-Null
             Test-Path -LiteralPath (Join-Path $dir '.usage/shunt.jsonl') | Should -BeTrue
+            Test-Path -LiteralPath (Join-Path $dir '.usage/.gitignore') | Should -BeFalse
+        }
+    }
+
+    Context '.usage self-ignore write failure' {
+        It 'leaves the decision and the telemetry line unchanged when the .gitignore write fails' {
+            $dir = Get-ShuntFixtureDir
+            $original = Get-Content -LiteralPath $script:HookSource -Raw
+            $broken = $original.Replace("(Join-Path `$SinkDir '.gitignore')", "(Join-Path `$SinkDir 'no-such-dir/.gitignore')")
+            $broken | Should -Not -BeExactly $original
+            $shim = Join-Path $dir 'shunt-broken-ignore.ps1'
+            [IO.File]::WriteAllText($shim, $broken, [Text.UTF8Encoding]::new($false))
+            $inputJson = Get-ShuntInputJson -ToolName 'Read' -ToolInput @{ file_path = (Join-Path $dir 'big.txt') }
+            $result = Invoke-ShuntHook -WorkingDirectory $dir -InputJson $inputJson -ScriptPath $shim
+            $result.StdErr | Should -BeNullOrEmpty
+            Test-ShuntDeny -Result $result | Should -BeTrue
+            @(Get-ShuntSinkLine -Dir $dir).Count | Should -Be 1
             Test-Path -LiteralPath (Join-Path $dir '.usage/.gitignore') | Should -BeFalse
         }
     }

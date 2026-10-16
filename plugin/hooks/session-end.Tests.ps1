@@ -44,6 +44,9 @@ Describe 'session-end default import command' {
 
         $result.ExitCode | Should -Be 0
         Test-Path -LiteralPath (Join-Path $worktree '.usage/usage.jsonl') | Should -BeTrue
+        $ignore = Join-Path $worktree '.usage/.gitignore'
+        Test-Path -LiteralPath $ignore | Should -BeTrue
+        (Get-Content -LiteralPath $ignore) | Should -Be '*'
     }
 
     It 'ships the import script next to the hooks directory' {

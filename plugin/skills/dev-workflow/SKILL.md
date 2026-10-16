@@ -1,9 +1,23 @@
 ---
 name: dev-workflow
-description: Multi-phase development workflow (spec, plan, implement, verify gates, git, multi-agent orchestration) for T1/T2 tasks — substantial features, refactors, or anything touching architecture, auth, DB, or a public API surface. Use when a task is routed T1 or T2 per AGENTS.md task-routing criteria, or when the user asks to "follow the workflow" / "orchestrate this".
+description: Multi-phase development workflow (spec, plan, implement, verify gates, git, multi-agent orchestration). Invoke before any change touching 2+ files, architecture, auth, DB, security or a public API surface, or when the user asks to "follow the workflow" / "orchestrate this"; in doubt, invoke. Skip for a single-file low-risk fix (typo, comment, quick fix).
 ---
 
-Multi-phase workflow. The main session is the default orchestrator. Files named below without a path (`gates.md`, `ui.md`, `metrics.md`) sit in the same directory as the SKILL.md file you are reading now (the repo copy, even when reached through the global shim's redirect); read one only when its trigger applies.
+The main session is the default orchestrator.
+
+- Agents named below are subagent types `agent-workflow:<name>`.
+- `gates.md`, `ui.md`, `metrics.md` sit in `"${CLAUDE_PLUGIN_ROOT}/skills/dev-workflow"`; read one only when its trigger applies.
+- Scripts dir: `"${CLAUDE_PLUGIN_ROOT}/scripts"`, run with the project root as cwd.
+
+## Routing
+
+Route on objective criteria: files touched, risk (security/auth/DB/data loss), API surface, architectural impact. In doubt, one level up.
+
+| Level | Trigger | Process |
+|---|---|---|
+| T0 | 1 file, low risk, no API surface | act directly |
+| T1 | 2–3 files, existing tests prove it | phases below |
+| T2 | architecture, auth, DB, public API, security; or 3+ files with new behavior | phases below |
 
 ## Phase 1 — Understand & Spec
 
@@ -55,12 +69,14 @@ Multi-phase workflow. The main session is the default orchestrator. Files named 
 
 - One branch per task: `feat/<scope>`, `fix/<scope>`, `chore/<scope>`. Conventional Commits (feat, fix, chore, docs, refactor, test), short, present tense; bullets only when needed.
 - Committing without asking is allowed on the task branch.
+- Project `.gitignore` lacks `.claude/settings.local.json` or `.usage/` → add them in the task's first commit.
 - Re-run `gate-keeper` after any reviewer-driven fix, before commit. An orchestrator-side check is not a gate.
 - Slice end = checkpoint: commit + updated status header. Next slice in a new session: Read the header (`limit: 5`) + `git log --oneline -5`, then only the plan sections it needs (`offset`/`limit`), never the whole file. Long session (e.g. after a compaction) → recommend `/clear` before the next slice.
 - Push only when the user explicitly asks. No force-push, no hook bypass, no secrets in commits.
 
 ## Multi-agent rules
 
+- Shunt: reading >350 lines / >64 KB or several large files → `bulk-reader` with a targeted question; predictable output (tests, config scaffolding, stubs) → `code-writer` with spec, reference file, target path. Keep on the primary model: known offset/limit reads, edits from analysis, debugging, architecture, subtle bugs, tasks smaller than the round-trip.
 - Every delegation prompt is self-contained: extracted spec, exact task, `file:line` anchors, stack conventions, acceptance criteria, known environment constraints (toolchain gaps, OS quirks, host-dependent test hazards). Never rely on session context.
 - Project `.claude/stacks/<stack>.md` (stack = `.gates.yml` `stack:`) exists → its absolute path goes in every `implementer` and `reviewer` brief. Stack trap found by review or gates → one line appended to it in the slice commit.
 - After dispatching, end the turn; never poll with blocking `TaskOutput`.
@@ -72,7 +88,7 @@ Multi-phase workflow. The main session is the default orchestrator. Files named 
 
 ### Review
 
-- Every reviewer prompt includes `pwsh -NoProfile -File scripts/review-checklist.ps1` output plus the spec. Checklist > ~10 files → parallel `reviewer` shards, one sub-checklist each; a single REQUEST_CHANGES blocks. LLM review never enters `.gates.yml`.
+- Every reviewer prompt includes `pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/review-checklist.ps1"` output plus the spec. Checklist > ~10 files → parallel `reviewer` shards, one sub-checklist each; a single REQUEST_CHANGES blocks. LLM review never enters `.gates.yml`.
 - T2 slice → escalate the reviewer one model tier (per-invocation `model` override), every shard included.
 - Commit only after APPROVE + green gates.
 - After REQUEST_CHANGES: any undisputed blocker/major, or undisputed findings across 2+ files → fresh `implementer` with them verbatim and proof form "Review fixes", the orchestrator keeping only the verdict and disputed findings; otherwise the orchestrator fixes (e.g. 2 nits in one file). Rebut each disputed finding in one line in the next round; the reviewer rules. Send the corrected diff back to the same reviewer (resume the session when possible).
