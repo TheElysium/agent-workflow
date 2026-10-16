@@ -245,7 +245,15 @@ if (-not (Test-Path -LiteralPath $src -PathType Container)) {
 
 $outParent = Split-Path -Path $outArg -Parent
 if ($outParent) {
+    $outParentIsNew = -not (Test-Path -LiteralPath $outParent)
     New-Item -ItemType Directory -Force -Path $outParent | Out-Null
+    if ($outParentIsNew -and (Split-Path -Path $outParent -Leaf) -ceq '.usage') {
+        try {
+            [IO.File]::WriteAllText([IO.Path]::Join($outParent, '.gitignore'), "*`n", [Text.UTF8Encoding]::new($false))
+        } catch {
+            $null = $_
+        }
+    }
 }
 
 $metaPath = if ($outArg.EndsWith('.jsonl', [StringComparison]::Ordinal)) {

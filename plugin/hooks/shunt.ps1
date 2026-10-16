@@ -268,9 +268,20 @@ function Write-ShuntTelemetry {
         $line = $sb.ToString()
 
         $sinkDir = Join-Path (Get-Location).Path '.usage'
+        $sinkDirIsNew = -not (Test-Path -LiteralPath $sinkDir)
         New-Item -ItemType Directory -Path $sinkDir -Force -ErrorAction Stop | Out-Null
+        if ($sinkDirIsNew) { Write-ShuntSinkSelfIgnore -SinkDir $sinkDir }
         $sinkPath = Join-Path $sinkDir 'shunt.jsonl'
         Write-ShuntTelemetryLine -SinkPath $sinkPath -Line $line
+    } catch {
+        return
+    }
+}
+
+function Write-ShuntSinkSelfIgnore {
+    param([Parameter(Mandatory)][string]$SinkDir)
+    try {
+        [IO.File]::WriteAllText((Join-Path $SinkDir '.gitignore'), "*`n", [Text.UTF8Encoding]::new($false))
     } catch {
         return
     }

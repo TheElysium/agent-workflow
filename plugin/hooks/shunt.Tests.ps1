@@ -666,6 +666,26 @@ Describe 'shunt hook' {
         }
     }
 
+    Context '.usage self-ignore' {
+        It 'writes .gitignore with * when telemetry creates the .usage directory' {
+            $dir = Get-ShuntFixtureDir
+            $inputJson = Get-ShuntInputJson -ToolName 'Read' -ToolInput @{ file_path = (Join-Path $dir 'small.txt') }
+            Invoke-ShuntHook -WorkingDirectory $dir -InputJson $inputJson | Out-Null
+            $ignore = Join-Path $dir '.usage/.gitignore'
+            Test-Path -LiteralPath $ignore | Should -BeTrue
+            (Get-Content -LiteralPath $ignore) | Should -Be '*'
+        }
+
+        It 'leaves a pre-existing .usage directory without .gitignore untouched' {
+            $dir = Get-ShuntFixtureDir
+            New-Item -ItemType Directory -Path (Join-Path $dir '.usage') | Out-Null
+            $inputJson = Get-ShuntInputJson -ToolName 'Read' -ToolInput @{ file_path = (Join-Path $dir 'small.txt') }
+            Invoke-ShuntHook -WorkingDirectory $dir -InputJson $inputJson | Out-Null
+            Test-Path -LiteralPath (Join-Path $dir '.usage/shunt.jsonl') | Should -BeTrue
+            Test-Path -LiteralPath (Join-Path $dir '.usage/.gitignore') | Should -BeFalse
+        }
+    }
+
     Context 'unwritable telemetry sink is best-effort' {
         It 'deny decision and stderr are unaffected when .usage cannot be created' {
             $dir = Get-ShuntFixtureDir

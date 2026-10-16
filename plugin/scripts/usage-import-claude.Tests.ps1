@@ -309,4 +309,39 @@ Describe 'usage-import-claude subagent transcripts' {
         $debugPath = Join-Path $root '.usage-import-debug-sess9-subagents-agent-dbg.jsonl'
         Test-Path -LiteralPath $debugPath | Should -BeTrue
     }
+
+    Context '.usage self-ignore' {
+        It 'writes .gitignore with * when it creates the .usage directory' {
+            $root = Initialize-IsolatedRoot
+            $projectsDir = Join-Path $root 'projects'
+            $subDir = Join-Path $projectsDir 'proj/sess1/subagents'
+            New-Item -ItemType Directory -Force -Path $subDir | Out-Null
+            $line = Format-AssistantLine -Id 'msg-ign-1' -Timestamp '2026-01-01T00:00:00.000Z' -SessionId 'sess1' -IsSidechain $true
+            Set-Content -LiteralPath (Join-Path $subDir 'agent-a.jsonl') -Value $line -NoNewline -Encoding utf8NoBOM
+
+            $outFile = Join-Path $root '.usage/usage.jsonl'
+            $result = Invoke-Import -ProjectsDir $projectsDir -Project 'proj' -OutFile $outFile
+            $result.ExitCode | Should -Be 0
+
+            $ignore = Join-Path $root '.usage/.gitignore'
+            Test-Path -LiteralPath $ignore | Should -BeTrue
+            (Get-Content -LiteralPath $ignore) | Should -Be '*'
+        }
+
+        It 'leaves a pre-existing .usage directory without .gitignore untouched' {
+            $root = Initialize-IsolatedRoot
+            $projectsDir = Join-Path $root 'projects'
+            $subDir = Join-Path $projectsDir 'proj/sess1/subagents'
+            New-Item -ItemType Directory -Force -Path $subDir | Out-Null
+            $line = Format-AssistantLine -Id 'msg-ign-2' -Timestamp '2026-01-01T00:00:00.000Z' -SessionId 'sess1' -IsSidechain $true
+            Set-Content -LiteralPath (Join-Path $subDir 'agent-a.jsonl') -Value $line -NoNewline -Encoding utf8NoBOM
+            New-Item -ItemType Directory -Path (Join-Path $root '.usage') | Out-Null
+
+            $outFile = Join-Path $root '.usage/usage.jsonl'
+            $result = Invoke-Import -ProjectsDir $projectsDir -Project 'proj' -OutFile $outFile
+            $result.ExitCode | Should -Be 0
+
+            Test-Path -LiteralPath (Join-Path $root '.usage/.gitignore') | Should -BeFalse
+        }
+    }
 }
