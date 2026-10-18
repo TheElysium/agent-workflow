@@ -1,8 +1,8 @@
 #Requires -Version 7.5
 
 BeforeAll {
-    $script:RealRepoRoot = Split-Path -Parent $PSScriptRoot
-    $script:ScriptPath = Join-Path $script:RealRepoRoot 'scripts/usage-report.ps1'
+    $script:PluginRoot = Split-Path -Parent $PSScriptRoot
+    $script:ScriptPath = Join-Path $script:PluginRoot 'scripts/usage-report.ps1'
     $script:PwshCmd = (Get-Command pwsh).Source
 
     function Invoke-Report {
@@ -17,7 +17,7 @@ BeforeAll {
         $psi.UseShellExecute = $false
         $psi.RedirectStandardOutput = $true
         $psi.RedirectStandardError = $true
-        $psi.WorkingDirectory = $script:RealRepoRoot
+        $psi.WorkingDirectory = $script:PluginRoot
         $proc = [Diagnostics.Process]::Start($psi)
         $stderrTask = $proc.StandardError.ReadToEndAsync()
         $stdout = $proc.StandardOutput.ReadToEnd()

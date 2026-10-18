@@ -17,8 +17,8 @@ try {
 
     $importCmd = $env:USAGE_IMPORT_CMD
     if ([string]::IsNullOrEmpty($importCmd)) {
-        $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-        $importCmd = Join-Path $repoRoot 'scripts' 'usage-import-claude.ps1'
+        $pluginRoot = Split-Path -Parent $PSScriptRoot
+        $importCmd = Join-Path $pluginRoot 'scripts' 'usage-import-claude.ps1'
     }
 
     $projects = $env:CLAUDE_PROJECTS_DIR

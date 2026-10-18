@@ -1,0 +1,17 @@
+{
+  "name": "agent-workflow",
+  "owner": { "name": "TheElysium" },
+  "metadata": { "description": "Multi-agent dev workflow kit for Claude Code" },
+  "plugins": [
+    {
+      "name": "agent-workflow",
+      "source": "./plugins/agent-workflow",
+      "description": "Multi-agent dev workflow: task routing, agent roster, enforceable gates"
+    },
+    {
+      "name": "shunt",
+      "source": "./plugins/shunt",
+      "description": "Token shunt: PreToolUse hook denying large Read/Bash output toward cheap bulk-reader/code-writer subagents"
+    }
+  ]
+}

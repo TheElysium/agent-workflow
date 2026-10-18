@@ -1,8 +1,8 @@
 #Requires -Version 7.5
 
 BeforeAll {
-    $script:RealRepoRoot = Split-Path -Parent $PSScriptRoot
-    $script:ScriptPath = Join-Path $script:RealRepoRoot 'scripts/usage-import-claude.ps1'
+    $script:PluginRoot = Split-Path -Parent $PSScriptRoot
+    $script:ScriptPath = Join-Path $script:PluginRoot 'scripts/usage-import-claude.ps1'
     $script:PwshCmd = (Get-Command pwsh).Source
 
     function Initialize-IsolatedRoot {
@@ -66,7 +66,7 @@ BeforeAll {
         $psi.UseShellExecute = $false
         $psi.RedirectStandardOutput = $true
         $psi.RedirectStandardError = $true
-        $psi.WorkingDirectory = if ($WorkingDirectory) { $WorkingDirectory } else { $script:RealRepoRoot }
+        $psi.WorkingDirectory = if ($WorkingDirectory) { $WorkingDirectory } else { $script:PluginRoot }
         $psi.EnvironmentVariables.Remove('USAGE_IMPORT_DEBUG')
         if ($EnvVars) {
             foreach ($k in $EnvVars.Keys) { $psi.EnvironmentVariables[$k] = $EnvVars[$k] }
@@ -308,5 +308,40 @@ Describe 'usage-import-claude subagent transcripts' {
 
         $debugPath = Join-Path $root '.usage-import-debug-sess9-subagents-agent-dbg.jsonl'
         Test-Path -LiteralPath $debugPath | Should -BeTrue
+    }
+
+    Context '.usage self-ignore' {
+        It 'writes .gitignore with * when it creates the .usage directory' {
+            $root = Initialize-IsolatedRoot
+            $projectsDir = Join-Path $root 'projects'
+            $subDir = Join-Path $projectsDir 'proj/sess1/subagents'
+            New-Item -ItemType Directory -Force -Path $subDir | Out-Null
+            $line = Format-AssistantLine -Id 'msg-ign-1' -Timestamp '2026-01-01T00:00:00.000Z' -SessionId 'sess1' -IsSidechain $true
+            Set-Content -LiteralPath (Join-Path $subDir 'agent-a.jsonl') -Value $line -NoNewline -Encoding utf8NoBOM
+
+            $outFile = Join-Path $root '.usage/usage.jsonl'
+            $result = Invoke-Import -ProjectsDir $projectsDir -Project 'proj' -OutFile $outFile
+            $result.ExitCode | Should -Be 0
+
+            $ignore = Join-Path $root '.usage/.gitignore'
+            Test-Path -LiteralPath $ignore | Should -BeTrue
+            (Get-Content -LiteralPath $ignore) | Should -Be '*'
+        }
+
+        It 'leaves a pre-existing .usage directory without .gitignore untouched' {
+            $root = Initialize-IsolatedRoot
+            $projectsDir = Join-Path $root 'projects'
+            $subDir = Join-Path $projectsDir 'proj/sess1/subagents'
+            New-Item -ItemType Directory -Force -Path $subDir | Out-Null
+            $line = Format-AssistantLine -Id 'msg-ign-2' -Timestamp '2026-01-01T00:00:00.000Z' -SessionId 'sess1' -IsSidechain $true
+            Set-Content -LiteralPath (Join-Path $subDir 'agent-a.jsonl') -Value $line -NoNewline -Encoding utf8NoBOM
+            New-Item -ItemType Directory -Path (Join-Path $root '.usage') | Out-Null
+
+            $outFile = Join-Path $root '.usage/usage.jsonl'
+            $result = Invoke-Import -ProjectsDir $projectsDir -Project 'proj' -OutFile $outFile
+            $result.ExitCode | Should -Be 0
+
+            Test-Path -LiteralPath (Join-Path $root '.usage/.gitignore') | Should -BeFalse
+        }
     }
 }

@@ -103,8 +103,8 @@ function Get-ShuntRedirectReason {
     param([string]$DisplayPath, [string]$Why)
     $l1 = "BLOCKED by shunt: `"$DisplayPath`" has $Why."
     $l2 = "Do NOT read this file directly $script:EmDash delegate I/O instead:"
-    $l3 = '  - For analysis/questions across files (incl. minified JSON): use the task tool with subagent "bulk-reader" (pass file paths + your question; you only consume the summary).'
-    $l4 = '  - For boilerplate generation: use the task tool with subagent "code-writer" (pass spec + reference file + target path).'
+    $l3 = '  - For analysis/questions across files (incl. minified JSON): use the task tool with subagent "shunt:bulk-reader" (pass file paths + your question; you only consume the summary).'
+    $l4 = '  - For boilerplate generation: use the task tool with subagent "shunt:code-writer" (pass spec + reference file + target path).'
     $l5 = "  - If you must edit a specific section of this file, do a targeted read with BOTH offset and limit (an offset alone reads the unbounded rest of the file) $script:EmDash that is allowed."
     return ($l1, $l2, $l3, $l4, $l5) -join $script:NewlineChar
 }
@@ -268,11 +268,22 @@ function Write-ShuntTelemetry {
         $line = $sb.ToString()
 
         $sinkDir = Join-Path (Get-Location).Path '.usage'
+        $sinkDirIsNew = -not (Test-Path -LiteralPath $sinkDir)
         New-Item -ItemType Directory -Path $sinkDir -Force -ErrorAction Stop | Out-Null
+        if ($sinkDirIsNew) { Write-ShuntSinkSelfIgnore -SinkDir $sinkDir }
         $sinkPath = Join-Path $sinkDir 'shunt.jsonl'
         Write-ShuntTelemetryLine -SinkPath $sinkPath -Line $line
     } catch {
         return
+    }
+}
+
+function Write-ShuntSinkSelfIgnore {
+    param([Parameter(Mandatory)][string]$SinkDir)
+    try {
+        [IO.File]::WriteAllText((Join-Path $SinkDir '.gitignore'), "*`n", [Text.UTF8Encoding]::new($false))
+    } catch {
+        $null = $_
     }
 }
 
