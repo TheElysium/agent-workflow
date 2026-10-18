@@ -1,0 +1,8 @@
+{
+  "name": "agent-workflow",
+  "version": "0.1.0",
+  "description": "Multi-agent dev workflow: task routing, agent roster, enforceable gates",
+  "author": { "name": "TheElysium" },
+  "license": "MIT",
+  "repository": "https://github.com/TheElysium/agent-workflow"
+}

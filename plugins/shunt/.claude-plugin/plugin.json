@@ -1,7 +1,7 @@
 {
-  "name": "agent-workflow",
+  "name": "shunt",
   "version": "0.1.0",
-  "description": "Multi-agent dev workflow: task routing, agent roster, token-shunt hook, enforceable gates",
+  "description": "Token shunt: PreToolUse hook denying large Read/Bash output toward cheap bulk-reader/code-writer subagents",
   "author": { "name": "TheElysium" },
   "license": "MIT",
   "repository": "https://github.com/TheElysium/agent-workflow"

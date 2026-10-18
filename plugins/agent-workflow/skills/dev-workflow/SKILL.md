@@ -28,7 +28,7 @@ Route on objective criteria: files touched, risk (security/auth/DB/data loss), A
 - Ambiguous or missing spec → interview the user, one question at a time, each with your recommended answer. Explore the codebase instead of asking when it holds the answer. Never guess requirements.
 - Design check: sketch the modules to build or modify, favoring deep modules (rich behavior behind a small, stable, testable interface); confirm with the user before coding.
 - UI slice (new component, template/CSS/markup change) → follow `ui.md`.
-- Heavy exploration → `explore` / `bulk-reader`, given a question, not a territory: "where is X computed, and is there more than one implementation?" beats "map the X module".
+- Heavy exploration → `explore`, given a question, not a territory: "where is X computed, and is there more than one implementation?" beats "map the X module".
 
 ## Phase 2 — Plan
 
@@ -53,7 +53,7 @@ Route on objective criteria: files touched, risk (security/auth/DB/data loss), A
 | Review fixes | Edit the test first, watch it fail, then fix (TDD again) |
 
 - Every `implementer` brief names its proof form from the table; a brief without one is an orchestrator defect.
-- The orchestrator edits code with Edit/Write. Shell edits (`sed -i`, `awk`, Python splices) only for one-line mechanical changes (rename, single-token substitution); never route around the shunt hook.
+- The orchestrator edits code with Edit/Write. Shell edits (`sed -i`, `awk`, Python splices) only for one-line mechanical changes (rename, single-token substitution).
 - Report a summarized diff (files touched + why), never a code dump.
 
 ## Phase 4 — Verify (mandatory gate)
@@ -76,7 +76,7 @@ Route on objective criteria: files touched, risk (security/auth/DB/data loss), A
 
 ## Multi-agent rules
 
-- Shunt: reading >350 lines / >64 KB or several large files → `bulk-reader` with a targeted question; predictable output (tests, config scaffolding, stubs) → `code-writer` with spec, reference file, target path. Keep on the primary model: known offset/limit reads, edits from analysis, debugging, architecture, subtle bugs, tasks smaller than the round-trip.
+- Keep on the primary model: known offset/limit reads, edits from analysis, debugging, architecture, subtle bugs, tasks smaller than the round-trip.
 - Every delegation prompt is self-contained: extracted spec, exact task, `file:line` anchors, stack conventions, acceptance criteria, known environment constraints (toolchain gaps, OS quirks, host-dependent test hazards). Never rely on session context.
 - Project `.claude/stacks/<stack>.md` (stack = `.gates.yml` `stack:`) exists → its absolute path goes in every `implementer` and `reviewer` brief. Stack trap found by review or gates → one line appended to it in the slice commit.
 - After dispatching, end the turn; never poll with blocking `TaskOutput`.

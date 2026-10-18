@@ -244,8 +244,8 @@ Describe 'shunt hook' {
             $parsed.hookSpecificOutput.hookEventName | Should -Be 'PreToolUse'
             $parsed.hookSpecificOutput.permissionDecision | Should -Be 'deny'
             $parsed.hookSpecificOutput.permissionDecisionReason | Should -Match 'BLOCKED by shunt'
-            $parsed.hookSpecificOutput.permissionDecisionReason | Should -Match 'agent-workflow:bulk-reader'
-            $parsed.hookSpecificOutput.permissionDecisionReason | Should -Match 'agent-workflow:code-writer'
+            $parsed.hookSpecificOutput.permissionDecisionReason | Should -Match 'shunt:bulk-reader'
+            $parsed.hookSpecificOutput.permissionDecisionReason | Should -Match 'shunt:code-writer'
         }
     }
 

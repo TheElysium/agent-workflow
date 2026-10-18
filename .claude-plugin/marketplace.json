@@ -5,8 +5,13 @@
   "plugins": [
     {
       "name": "agent-workflow",
-      "source": "./plugin",
-      "description": "Multi-agent dev workflow: task routing, agent roster, token-shunt hook, enforceable gates"
+      "source": "./plugins/agent-workflow",
+      "description": "Multi-agent dev workflow: task routing, agent roster, enforceable gates"
+    },
+    {
+      "name": "shunt",
+      "source": "./plugins/shunt",
+      "description": "Token shunt: PreToolUse hook denying large Read/Bash output toward cheap bulk-reader/code-writer subagents"
     }
   ]
 }
