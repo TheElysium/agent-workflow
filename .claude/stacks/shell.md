@@ -12,3 +12,4 @@
 - List file names with `-z` and read with `mapfile -d ''` (spaces, non-ASCII).
 - Stage new executables with `git add --chmod=+x` (`core.filemode` is false on Windows).
 - Every script: `set -euo pipefail`, LF endings, ASCII-only source, clean under `shellcheck`.
+- `producer | cat >>` is one append only if the record fits the producer's stdio buffer (~4 KB for jq): cap record size.
