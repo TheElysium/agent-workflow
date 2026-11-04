@@ -13,3 +13,5 @@
 - Stage new executables with `git add --chmod=+x` (`core.filemode` is false on Windows).
 - Every script: `set -euo pipefail`, LF endings, ASCII-only source, clean under `shellcheck`.
 - `producer | cat >>` is one append only if the record fits the producer's stdio buffer (~4 KB for jq): cap record size.
+- `cat >>` copies in 128 KiB chunks: write big appends as line-aligned groups <= 60000 bytes, one `cat <<<` each (fits the 64 KiB pipe buffer), sized under `LC_ALL=C`.
+- `${#x}` counts bytes under `LC_ALL=C`: count characters under a probed UTF-8 locale (`C.UTF-8`, `en_US.UTF-8`).
