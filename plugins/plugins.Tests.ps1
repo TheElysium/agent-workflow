@@ -65,7 +65,7 @@ BeforeAll {
 
     function Find-CwdRelativeScriptCall {
         param([Parameter(Mandatory)]$Files)
-        return Find-MarkdownLine -Files $Files -Pattern '(?<!\$\{CLAUDE_PLUGIN_ROOT\}/)\bscripts/[\w-]+\.ps1'
+        return Find-MarkdownLine -Files $Files -Pattern '(?<!\$\{CLAUDE_PLUGIN_ROOT\}/)\bscripts/[\w-]+\.(ps1|sh)\b'
     }
 
     function Find-MisplacedPluginVariable {
@@ -153,10 +153,10 @@ Describe 'plugin <Name>' -ForEach $script:PluginCases {
             }
         }
 
-        It 'every referenced .ps1 is double-quoted in the command' {
+        It 'every referenced script is double-quoted in the command' {
             foreach ($command in Get-HookCommand -PluginRoot $script:PluginRoot) {
-                $command | Should -Match '"\$\{CLAUDE_PLUGIN_ROOT\}/[^"]+\.ps1"'
-                $command | Should -Not -Match '(?<!")\$\{CLAUDE_PLUGIN_ROOT\}/\S+\.ps1'
+                $command | Should -Match '"\$\{CLAUDE_PLUGIN_ROOT\}/[^"]+\.(ps1|sh)"'
+                $command | Should -Not -Match '(?<!")\$\{CLAUDE_PLUGIN_ROOT\}/\S+\.(ps1|sh)'
             }
         }
     }
