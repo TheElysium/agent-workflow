@@ -88,7 +88,7 @@ Route on objective criteria: files touched, risk (security/auth/DB/data loss), A
 
 ### Review
 
-- Every reviewer prompt includes `pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/review-checklist.ps1"` output plus the spec. Checklist > ~10 files → parallel `reviewer` shards, one sub-checklist each; a single REQUEST_CHANGES blocks. LLM review never enters `.gates.yml`.
+- Every reviewer prompt includes `bash "${CLAUDE_PLUGIN_ROOT}/scripts/review-checklist.sh"` output plus the spec. Checklist > ~10 files → parallel `reviewer` shards, one sub-checklist each; a single REQUEST_CHANGES blocks. LLM review never enters `.gates.yml`.
 - T2 slice → escalate the reviewer one model tier (per-invocation `model` override), every shard included.
 - Commit only after APPROVE + green gates.
 - After REQUEST_CHANGES: any undisputed blocker/major, or undisputed findings across 2+ files → fresh `implementer` with them verbatim and proof form "Review fixes", the orchestrator keeping only the verdict and disputed findings; otherwise the orchestrator fixes (e.g. 2 nits in one file). Rebut each disputed finding in one line in the next round; the reviewer rules. Send the corrected diff back to the same reviewer (resume the session when possible).

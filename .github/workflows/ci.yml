@@ -13,12 +13,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install Pester and PSScriptAnalyzer
-        shell: pwsh
-        run: |
-          Install-Module -Name Pester -RequiredVersion 6.2.0 -Scope CurrentUser -Force -SkipPublisherCheck
-          Install-Module -Name PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force
-
       - name: Install gitleaks
         run: |
           set -euo pipefail
@@ -27,5 +21,15 @@ jobs:
           sudo install -m 755 /tmp/gitleaks /usr/local/bin/gitleaks
           gitleaks version
 
+      - name: Install jq
+        run: |
+          set -euo pipefail
+          curl -sSfL -o /tmp/jq https://github.com/jqlang/jq/releases/download/jq-1.8.1/jq-linux-amd64
+          sudo install -m 755 /tmp/jq /usr/local/bin/jq
+          jq --version
+
+      - name: Check shellcheck
+        run: shellcheck --version
+
       - name: Run gates
-        run: pwsh -NoProfile -File scripts/run-gates.ps1
+        run: bash scripts/run-gates.sh

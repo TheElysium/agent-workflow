@@ -62,7 +62,7 @@ and phases in `plugins/agent-workflow/skills/dev-workflow/SKILL.md`.
 
 ## Install
 
-```powershell
+```sh
 claude plugin marketplace add TheElysium/agent-workflow
 claude plugin install agent-workflow@agent-workflow
 claude plugin install shunt@agent-workflow
@@ -76,10 +76,10 @@ Not shippable in a plugin — add by hand to `~/.claude/settings.json` if wanted
 
 ```json
 "permissions": { "ask": ["Bash(git push:*)", "Bash(git push)"] },
-"statusLine": { "type": "command", "command": "pwsh -NoProfile -File C:/path/to/statusline-command.ps1" }
+"statusLine": { "type": "command", "command": "bash C:/path/to/statusline-command.sh" }
 ```
 
-`statusline-command.ps1` is in `.claude/` of a clone of this repo (not installed by the plugin).
+`statusline-command.sh` is in `.claude/` of a clone of this repo (not installed by the plugin).
 
 Per project: create `.gates.yml` at the root (format in `plugins/agent-workflow/skills/dev-workflow/gates.md`),
 optionally `.claude/stacks/<stack>.md`. Plugin agents cannot be overridden by a same-name
@@ -95,7 +95,7 @@ project agent: a project `.claude/agents/<name>.md` is a separate agent.
 
 ### Rollback
 
-```powershell
+```sh
 claude plugin uninstall agent-workflow
 claude plugin uninstall shunt
 claude plugin marketplace remove agent-workflow
@@ -109,21 +109,20 @@ plugins/agent-workflow/.claude-plugin/        plugin.json manifest (name, versio
 plugins/agent-workflow/agents/                implementer reviewer gate-keeper explore spec-critic
 plugins/agent-workflow/skills/dev-workflow/   routing + 5 phases + multi-agent rules; gates.md, ui.md,
                                               metrics.md read when triggered
-plugins/agent-workflow/hooks/                 hooks.json (SessionEnd), session-end.ps1 (usage import)
+plugins/agent-workflow/hooks/                 hooks.json (SessionEnd), session-end.sh (usage import)
 plugins/agent-workflow/scripts/               review-checklist, usage-report, usage-import-claude, session-tools
 plugins/shunt/.claude-plugin/                 plugin.json manifest (name, version)
 plugins/shunt/agents/                         bulk-reader code-writer
-plugins/shunt/hooks/                          hooks.json (PreToolUse), shunt.ps1
+plugins/shunt/hooks/                          hooks.json (PreToolUse), shunt.sh
 plugins/shunt/scripts/                        shunt-report
-plugins/**/*.Tests.ps1                        Pester, next to the file under test;
-                                              plugins/plugins.Tests.ps1 guards manifests and paths per plugin
+plugins/**/test-*.sh                          plain bash, next to the file under test;
+                                              plugins/test-plugins.sh guards manifests and paths per plugin
 AGENTS.md                                     this repo's rules only. CLAUDE.md = one line @AGENTS.md
 .claude/settings.json                         this repo: permissions, statusLine   settings.local.json  never committed
 .claude/stacks/<stack>.md                     per-project stack traps, one line each, path passed to implementer + reviewer
 .opencode/                                    unmaintained: roster, shunt.ts, usage-log.ts, bun tests; outside gates and CI
-scripts/run-gates.ps1                         executes .gates.yml (gate-keeper + CI)
+scripts/run-gates.sh                          executes .gates.yml (gate-keeper + CI)
 .gates.yml                                    lint / test / sast
-PSScriptAnalyzerSettings.psd1                 lint rules for the .ps1 gate
 .github/ githooks/                            this repo's own CI and self-gate, not shipped
 ```
 
@@ -136,22 +135,27 @@ PSScriptAnalyzerSettings.psd1                 lint rules for the .ps1 gate
   (`echo "gate not configured" >&2 && exit 1`). A green run proving nothing is worse than none.
 - SAST is non-skippable. A run without it is a red gate. Missing tool = FAIL, never skip.
 - Local-only by default; CI optional. Long tasks persist state in `docs/tasks/<slug>.md`.
-- This repo self-gates: `git config core.hooksPath githooks` (PSScriptAnalyzer, secrets,
-  accents, JSON, `CLAUDE.md == @AGENTS.md`); `githooks/pre-commit` is a sh shim to
-  `pre-commit.ps1`.
+- This repo self-gates: `git config core.hooksPath githooks` (shellcheck, secrets,
+  accents, JSON, `CLAUDE.md == @AGENTS.md`); `githooks/pre-commit` is a bash script.
 
 ## Dependencies
 
 | Tool | Needed by | Notes |
 |---|---|---|
-| PowerShell 7.5+ (`pwsh`) | hooks, statusline, scripts, gates | `winget install Microsoft.PowerShell` |
-| PSScriptAnalyzer 1.25.0, Pester 6.2.0 | lint + test gates, self-gate | `Install-Module <name> -RequiredVersion <v> -Scope CurrentUser` |
+| bash 4.4+, GNU coreutils | hooks, statusline, scripts, gates | Windows: Git Bash; macOS: `brew install bash coreutils` |
+| `jq` 1.7+ | hooks, statusline, scripts, gates | `winget install jqlang.jq`; CI pins 1.8.1 |
+| `shellcheck` | lint gate, self-gate | missing gate tool = hard red |
 | `gitleaks` | sast gate, self-gate | missing gate tool = hard red |
 | `bun` | opencode plugins only (unmaintained) | `bun install` in `.opencode/` |
 
+### Migrating from 0.1.x (pwsh)
+
+- Plugins 0.2.0 drop `pwsh`: `winget install jqlang.jq`, then `claude plugin update agent-workflow` and `claude plugin update shunt`.
+- Hand-added statusline: point `statusLine.command` at `bash <clone>/.claude/statusline-command.sh`.
+
 ## Telemetry
 
-- **Shunt**: `shunt.ts` (opencode) and `shunt.ps1` (Claude), same thresholds - 350 lines /
+- **Shunt**: `shunt.ts` (opencode) and `shunt.sh` (Claude), same thresholds - 350 lines /
   65536 bytes, tunable with `SHUNT_MIN_LINES` / `SHUNT_MAX_BYTES`. Divergences: exactly
   350 lines passes on the Claude side (counts `\n`), blocked on the opencode side (counts the
   trailing newline); `verb/foo.txt` with no trailing space is blocked opencode-side only.
@@ -159,17 +163,17 @@ PSScriptAnalyzerSettings.psd1                 lint rules for the .ps1 gate
   Bash-tool commands resolve to `C:\...`.
 - **Sink**: hooks write to `.usage/` in the project root; each plugin creates it on its own.
   A `.usage/` created by either plugin holds a `.gitignore` with `*`.
-  Purge with `Remove-Item -Recurse .usage`.
+  Purge with `rm -rf .usage`.
 - **Shunt log**: every decision (allow and deny) appends one JSONL line to
   `.usage/shunt.jsonl`. Schema: `ts` `harness` `session` `tool` `decision` `reason` `path`
   `bytes` `lines` `threshold_bytes` `threshold_lines`, plus `command` (bash) or
   `offset`/`limit` (read); records with no `decision` are legacy denies. One record per
   file arg. Best-effort: a write failure never blocks the redirect. Aggregate with
-  `plugins/shunt/scripts/shunt-report.ps1`. Never rotated.
+  `plugins/shunt/scripts/shunt-report.sh`. Never rotated.
 - **Usage**: SessionEnd imports main and subagent transcripts
   (`<session>/subagents/agent-*.jsonl`) into `.usage/usage.jsonl`; unchanged files are skipped
   by mtime. First run on a large history may exceed the 10 s hook timeout (progress is kept):
-  `pwsh -NoProfile -File <plugin>/scripts/usage-import-claude.ps1 --project <slug> --out .usage/usage.jsonl`
+  `bash <plugin>/scripts/usage-import-claude.sh --project <slug> --out .usage/usage.jsonl`
   (`<plugin>` = installed agent-workflow root under `~/.claude/plugins/cache/`, or `plugins/agent-workflow/` of a clone).
 - **Accepted divergences**: `hidden`/`temperature` opencode-only; `effort` Claude-only, so
   model tiers are set independently; detailed permissions opencode-only. opencode no longer

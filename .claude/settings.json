@@ -7,6 +7,6 @@
   },
   "statusLine": {
     "type": "command",
-    "command": "pwsh -NoProfile -File .claude/statusline-command.ps1"
+    "command": "bash .claude/statusline-command.sh"
   }
 }
