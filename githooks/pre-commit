@@ -1,2 +1,240 @@
-#!/bin/sh
-exec pwsh -NoProfile -File "$(dirname "$0")/pre-commit.ps1" "$@"
+#!/usr/bin/env bash
+set -Eeuo pipefail
+export MSYS2_ARG_CONV_EXCL='*'
+
+EM=$'\xe2\x80\x94'
+ACCENT_PATTERN='[\x{00C0}-\x{00D6}\x{00D8}-\x{00F6}\x{00F8}-\x{00FF}\x{0152}\x{0153}]'
+
+has_failure=0
+block_printed=0
+tmp_dir=""
+blob_file=""
+staged=()
+selected=()
+
+say() { printf 'pre-commit: %s\n' "$*"; }
+
+add_failure() {
+    has_failure=1
+    say "FAIL: $*"
+}
+
+block_commit() {
+    block_printed=1
+    say "commit blocked $EM fix the failures above"
+    exit 1
+}
+
+on_exit() {
+    local status=$?
+    if [[ -n "$tmp_dir" ]]; then
+        rm -rf "$tmp_dir"
+    fi
+    if [[ $status -ne 0 && $block_printed -eq 0 ]]; then
+        say "commit blocked $EM fix the failures above"
+    fi
+}
+
+abort_unexpected() {
+    trap - ERR
+    add_failure "unexpected error $EM $1"
+    block_commit
+}
+
+on_error() {
+    abort_unexpected "command failed with exit $1 at line $2"
+}
+
+trap on_exit EXIT
+trap 'on_error $? $LINENO' ERR
+
+read_blob() {
+    local err rc=0
+    err="$(git cat-file blob ":$1" 2>&1 >"$blob_file")" || rc=$?
+    if [[ $rc -ne 0 ]]; then
+        add_failure "git cat-file blob failed for $1 $EM ${err//$'\n'/ }"
+        return 1
+    fi
+}
+
+list_staged() {
+    local filter="$1" list_file="$tmp_dir/list"
+    git diff --cached --name-only "--diff-filter=$filter" -z >"$list_file"
+    mapfile -d '' -t "$2" <"$list_file"
+}
+
+select_by_extension() {
+    local file
+    selected=()
+    for file in ${staged[@]+"${staged[@]}"}; do
+        if [[ "${file,,}" =~ $1 ]]; then
+            selected+=("$file")
+        fi
+    done
+}
+
+select_shell_files() {
+    local file
+    selected=()
+    for file in ${staged[@]+"${staged[@]}"}; do
+        if [[ "${file,,}" == *.sh || "$file" == githooks/pre-commit ]]; then
+            selected+=("$file")
+        fi
+    done
+}
+
+shell_dialect() {
+    local first=""
+    IFS= read -r first <"$blob_file" || true
+    if [[ "$first" =~ ^#!.*[/[:space:]](sh|dash|ash)([[:space:]]|$) ]]; then
+        printf 'sh'
+    else
+        printf 'bash'
+    fi
+}
+
+check_shellcheck() {
+    local file dialect
+    select_shell_files
+    if [[ ${#selected[@]} -eq 0 ]]; then
+        return 0
+    fi
+    if ! command -v shellcheck >/dev/null 2>&1; then
+        add_failure "shellcheck not installed"
+        return 0
+    fi
+    for file in "${selected[@]}"; do
+        read_blob "$file" || continue
+        dialect="$(shell_dialect)"
+        if shellcheck -s "$dialect" - <"$blob_file" >/dev/null 2>&1; then
+            say "shellcheck: ok ($file)"
+        else
+            add_failure "shellcheck $file"
+        fi
+    done
+}
+
+check_secrets() {
+    local rc=0
+    if ! command -v gitleaks >/dev/null 2>&1; then
+        add_failure "gitleaks not installed $EM SAST is non-skippable"
+        return 0
+    fi
+    gitleaks protect --staged --redact </dev/null >/dev/null 2>&1 || rc=$?
+    case "$rc" in
+        0) say "gitleaks: ok" ;;
+        1) add_failure "gitleaks found secrets in staged changes" ;;
+        *) add_failure "gitleaks exited $rc" ;;
+    esac
+}
+
+has_accent() {
+    LC_ALL=C.UTF-8 grep -aqP -- "$ACCENT_PATTERN"
+}
+
+accent_check_available() {
+    local rc=0
+    printf '\xc3\xa9' | has_accent || rc=$?
+    [[ $rc -eq 0 ]]
+}
+
+check_accents() {
+    local file rc all_clean=1
+    select_by_extension '\.(md|sh|json|jsonc|yml|yaml|txt|ts|ps1|psd1)$'
+    if [[ ${#selected[@]} -eq 0 ]]; then
+        return 0
+    fi
+    if ! accent_check_available; then
+        add_failure "accent check unavailable $EM grep -P with a UTF-8 locale is required"
+        return 0
+    fi
+    for file in "${selected[@]}"; do
+        read_blob "$file" || { all_clean=0; continue; }
+        rc=0
+        has_accent <"$blob_file" || rc=$?
+        case "$rc" in
+            0)
+                add_failure "accented characters (docs must be plain English) in: $file"
+                all_clean=0
+                ;;
+            1) ;;
+            *)
+                add_failure "accent check failed (grep exited $rc) for: $file"
+                all_clean=0
+                ;;
+        esac
+    done
+    if [[ $all_clean -eq 1 ]]; then
+        say "accents: ok"
+    fi
+}
+
+is_valid_json() {
+    local out
+    out="$(jq -b -e '[.. | numbers | select(isnan or isinfinite)] | length == 0' <"$blob_file" 2>"$tmp_dir/jq.err")" || return 1
+    [[ "$out" == "true" && ! -s "$tmp_dir/jq.err" ]]
+}
+
+check_json() {
+    local file
+    select_by_extension '\.json$'
+    if [[ ${#selected[@]} -eq 0 ]]; then
+        return 0
+    fi
+    if ! command -v jq >/dev/null 2>&1; then
+        add_failure "jq not installed $EM JSON validation is a gate, not optional"
+        return 0
+    fi
+    for file in "${selected[@]}"; do
+        read_blob "$file" || continue
+        if is_valid_json; then
+            say "json: ok ($file)"
+        else
+            add_failure "invalid JSON: $file"
+        fi
+    done
+}
+
+blob_equals() {
+    printf '%s' "$1" >"$tmp_dir/expected"
+    cmp -s "$blob_file" "$tmp_dir/expected"
+}
+
+check_claude_md() {
+    local deleted=() file
+    if git cat-file -e ":CLAUDE.md" 2>/dev/null; then
+        read_blob CLAUDE.md || return 0
+        if blob_equals '@AGENTS.md' || blob_equals $'@AGENTS.md\n'; then
+            say "agents-sync: ok"
+        else
+            add_failure "CLAUDE.md must be exactly one line: @AGENTS.md"
+        fi
+        return 0
+    fi
+    list_staged D deleted
+    for file in ${deleted[@]+"${deleted[@]}"}; do
+        if [[ "$file" == "CLAUDE.md" ]]; then
+            add_failure "CLAUDE.md cannot be deleted"
+        fi
+    done
+}
+
+main() {
+    tmp_dir="$(mktemp -d)"
+    blob_file="$tmp_dir/blob"
+    if [[ -n "${PRECOMMIT_FORCE_ERROR:-}" ]]; then
+        abort_unexpected "$PRECOMMIT_FORCE_ERROR"
+    fi
+    list_staged ACMR staged
+    check_shellcheck
+    check_secrets
+    check_accents
+    check_json
+    check_claude_md
+    if [[ $has_failure -ne 0 ]]; then
+        block_commit
+    fi
+    say "all checks passed"
+}
+
+main
