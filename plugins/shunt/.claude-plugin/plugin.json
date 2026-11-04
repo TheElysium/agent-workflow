@@ -1,6 +1,6 @@
 {
   "name": "shunt",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Token shunt: PreToolUse hook denying large Read/Bash output toward cheap bulk-reader/code-writer subagents",
   "author": { "name": "TheElysium" },
   "license": "MIT",
