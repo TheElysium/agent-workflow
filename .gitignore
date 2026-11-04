@@ -5,4 +5,3 @@ reports/
 .opencode/settings.local.json
 .usage/
 *.stackdump
-testResults.xml

@@ -5,12 +5,9 @@
 #   - Executed verbatim by gate-keeper locally and by scripts/run-gates.sh (bash) in CI.
 #   - Each command runs with `bash -c` from the repo root, stdin /dev/null.
 # Requires on PATH (gates + githooks/pre-commit): bash jq shellcheck gitleaks.
-# Transition: pwsh (Pester 6.2.0, PSScriptAnalyzer 1.25.0) until the remaining .ps1 are ported.
 # Missing tool = FAIL, never a skip.
 stack: shell
 lint-sh: set -o pipefail; git ls-files -z --cached --others --exclude-standard -- '*.sh' githooks/pre-commit | sort -zu | xargs -0 shellcheck
-lint-ps: pwsh -NoProfile -Command "Import-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -ErrorAction Stop; Invoke-ScriptAnalyzer -Path . -Recurse -Settings PSScriptAnalyzerSettings.psd1 -ReportSummary -OutVariable findings; if ((Get-Variable -Name findings -ValueOnly).Count -gt 0) { exit 2 } else { exit 0 }"
 test-sh: set -o pipefail; git ls-files -z --cached --others --exclude-standard -- '*.sh' | sort -zu | while IFS= read -r -d '' f; do case "$f" in .opencode/*) continue;; esac; case "${f##*/}" in test-*.sh) bash "$f" </dev/null || exit 1;; esac; done
-test-ps: pwsh -NoProfile -Command "Import-Module Pester -RequiredVersion 6.2.0 -ErrorAction Stop; Invoke-Pester -CI -ExcludePath '*node_modules*'"
 modes: set -o pipefail; git ls-files -s -- '*.sh' githooks/pre-commit | { ! grep -v '^100755 '; }
 sast: gitleaks detect --no-banner --redact
