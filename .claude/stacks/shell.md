@@ -15,3 +15,6 @@
 - `producer | cat >>` is one append only if the record fits the producer's stdio buffer (~4 KB for jq): cap record size.
 - `cat >>` copies in 128 KiB chunks: write big appends as line-aligned groups <= 60000 bytes, one `cat <<<` each (fits the 64 KiB pipe buffer), sized under `LC_ALL=C`.
 - `${#x}` counts bytes under `LC_ALL=C`: count characters under a probed UTF-8 locale (`C.UTF-8`, `en_US.UTF-8`).
+- `MSYS2_ARG_CONV_EXCL='*'` also stops `/tmp/...` conversion for native `jq.exe`: feed files on stdin (`jq ... < "$f"`).
+- `IFS=$'\t' read` merges empty fields (tab is IFS whitespace): split with parameter expansion or `awk -F'\t'`.
+- Detect CR with `[[ $s == *"$CR"* ]]` (`CR=$(printf '\r')`), never `grep $'\r'` (unreliable under Git Bash).
