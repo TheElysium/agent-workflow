@@ -54,6 +54,7 @@ Route on objective criteria: files touched, risk (security/auth/DB/data loss), A
 
 - Every `implementer` brief names its proof form from the table; a brief without one is an orchestrator defect.
 - The orchestrator edits code with Edit/Write. Shell edits (`sed -i`, `awk`, Python splices) only for one-line mechanical changes (rename, single-token substitution).
+- No comments, except on functions/methods and classes/interfaces/structs, max 2 lines each.
 - Report a summarized diff (files touched + why), never a code dump.
 
 ## Phase 4 — Verify (mandatory gate)
